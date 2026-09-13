@@ -70,6 +70,22 @@ class TestHappyPath:
         assert body["direction_display"] == "270.00"
         assert 0.0 <= body["direction_deg"] < 360.0
 
+    def test_direction_rounded_to_360_displayed_as_0(self):
+        # 359.995…° 舍入后须归一为 0.00，不得显示 360.00
+        resp = post(
+            {
+                "tubes": [
+                    {"hole": 10, "mass_g": 26},
+                    {"hole": 9, "mass_g": 81},
+                    {"hole": 1, "mass_g": 207},
+                ]
+            }
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["direction_display"] == "0.00"
+        assert 0.0 <= body["direction_deg"] < 360.0
+
 
 class TestValidation:
     def test_duplicate_hole_rejected(self):

@@ -40,6 +40,19 @@ def round2_display(value: float) -> str:
     return format(quantized, "f")
 
 
+def direction_display(direction_deg: float) -> str:
+    """方向角展示值：两位小数，且仍落在 [0°, 360°) 内。
+
+    归一化后的方向可能为 359.995…°，四舍五入得到 360.00，须再次归一为 0.00。
+    """
+    quantized = Decimal(str(direction_deg)).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    ) % Decimal("360.00")
+    if quantized == 0:
+        quantized = Decimal("0.00")
+    return format(quantized, "f")
+
+
 def hole_angle_deg(hole: int) -> float:
     """孔位 k 的固定角度：30k 度。"""
     return ANGLE_STEP_DEG * hole

@@ -8,6 +8,7 @@ from app.physics import (
     TOLERANCE_G,
     TubeLoad,
     compute_resultant,
+    direction_display,
     hole_angle_deg,
     round2_display,
 )
@@ -108,6 +109,31 @@ class TestContributions:
         assert c5.y_g == pytest.approx(200 * math.sin(math.radians(150)))
         assert result.x_g == pytest.approx(c1.x_g + c5.x_g)
         assert result.y_g == pytest.approx(c1.y_g + c5.y_g)
+
+
+class TestDirectionDisplay:
+    def test_rounded_360_renormalized_to_0(self):
+        # 实测用例：净方向略偏负 Y，atan2 ≈ -0.005°，归一化 359.995…°，
+        # 两位小数舍入为 360.00，展示层必须再次归一为 0.00
+        result = compute_resultant(loads((10, 26), (9, 81), (1, 207)))
+        assert 0.0 <= result.direction_deg < 360.0
+        assert result.direction_deg == pytest.approx(359.995, abs=1e-3)
+        assert direction_display(result.direction_deg) == "0.00"
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (0.0, "0.00"),
+            (45.0, "45.00"),
+            (359.994, "359.99"),
+            (359.995, "0.00"),
+            (359.999999, "0.00"),
+            (180.0, "180.00"),
+            (270.0, "270.00"),
+        ],
+    )
+    def test_display_stays_in_0_to_360_exclusive(self, value, expected):
+        assert direction_display(value) == expected
 
 
 class TestRound2Display:

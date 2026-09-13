@@ -56,6 +56,15 @@ test("非整数录入：前端直接提示，不发出请求", async ({ page }) 
   await expect(page.getByTestId("verdict")).toHaveCount(0);
 });
 
+test("合成方向舍入为 360.00° 时归一显示 0.00°", async ({ page }) => {
+  await page.getByTestId("mass-input-10").fill("26");
+  await page.getByTestId("mass-input-9").fill("81");
+  await page.getByTestId("mass-input-1").fill("207");
+  await page.getByRole("button", { name: "核验" }).click();
+
+  await expect(page.getByTestId("direction")).toHaveText("0.00°");
+});
+
 test("修改任何孔位后立即清除旧结论", async ({ page }) => {
   await page.getByTestId("mass-input-0").fill("100");
   await page.getByTestId("mass-input-6").fill("100");

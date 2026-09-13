@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .models import ContributionOut, VerifyRequest, VerifyResponse
-from .physics import TOLERANCE_G, TubeLoad, compute_resultant, round2_display
+from .physics import TOLERANCE_G, TubeLoad, compute_resultant, direction_display, round2_display
 
 app = FastAPI(title="十二孔离心转子偏载核验台", version="1.0.0")
 
@@ -40,7 +40,7 @@ def verify(request: VerifyRequest) -> VerifyResponse:
         residual_display=round2_display(result.residual_g),
         direction_deg=result.direction_deg,
         direction_display=(
-            "无" if result.direction_deg is None else round2_display(result.direction_deg)
+            "无" if result.direction_deg is None else direction_display(result.direction_deg)
         ),
         x_g=result.x_g,
         y_g=result.y_g,
