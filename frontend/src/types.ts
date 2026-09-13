@@ -25,6 +25,25 @@ export interface OperatingConditionResult {
   centrifugal_force_display: string;
 }
 
+export interface OppositeDifference {
+  /** 对置孔中较小的孔号（0–5） */
+  first_hole: number;
+  /** 对置孔中较大的孔号（6–11，恰为 first_hole + 6） */
+  opposite_hole: number;
+  /** 前者质量（空孔为 0） */
+  first_mass_g: number;
+  /** 对面质量（空孔为 0） */
+  opposite_mass_g: number;
+  /** 有符号差值：前者质量减后者质量 */
+  delta_g: number;
+  delta_display: string;
+  /** 该差值在前者孔位角度上形成的 X / Y 贡献（克，未舍入） */
+  x_g: number;
+  y_g: number;
+  x_display: string;
+  y_display: string;
+}
+
 export interface VerifyResponse {
   balanced: boolean;
   verdict: string;
@@ -42,4 +61,6 @@ export interface VerifyResponse {
   suggestion: BalanceSuggestion | null;
   /** 仅在请求带完整工况（转速 + 有效半径）时非空 */
   condition: OperatingConditionResult | null;
+  /** 对置差异诊断：仅拒绝时给出（六对，按绝对差降序）；放行或旧版响应缺省 */
+  opposite_differences?: OppositeDifference[] | null;
 }

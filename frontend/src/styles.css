@@ -86,6 +86,17 @@ body {
   fill: var(--panel-border);
 }
 
+.rotor-dot.pair-highlight {
+  fill: var(--accent);
+}
+
+.pair-link {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  opacity: 0.85;
+}
+
 .rotor-hub {
   fill: var(--muted);
 }
@@ -175,6 +186,16 @@ body {
 
 .hole.has-error input {
   border-color: var(--fail);
+}
+
+.hole.pair-highlight label {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.hole.pair-highlight input {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(77, 163, 255, 0.35);
 }
 
 .field-error {
@@ -394,6 +415,77 @@ button:disabled {
   padding: 10px 14px;
   color: var(--fail);
   font-size: 0.9rem;
+}
+
+/* ---------- 对置差异诊断 ---------- */
+
+.opposite-diagnostics {
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+}
+
+.opposite-title {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.opposite-diagnostics ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pair-row {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 7px 10px;
+  text-align: left;
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+  border-radius: 6px;
+}
+
+.pair-row:hover {
+  border-color: var(--accent);
+}
+
+.pair-row.selected {
+  border-color: var(--accent);
+  background: rgba(77, 163, 255, 0.14);
+}
+
+.pair-holes {
+  flex: 1 1 220px;
+}
+
+.pair-delta {
+  font-weight: 700;
+  color: var(--fail);
+}
+
+.pair-row.selected .pair-delta {
+  color: var(--accent);
+}
+
+.pair-contrib {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.pair-hint {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.76rem;
 }
 
 .summary {

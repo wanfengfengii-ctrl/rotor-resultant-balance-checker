@@ -148,6 +148,111 @@ class TestSuggestion:
         assert body["suggestion"] is None
 
 
+class TestOppositeDifferences:
+    def test_rejection_includes_six_sorted_pairs(self):
+        resp = post(
+            {"tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 90}]}
+        )
+        body = resp.json()
+        pairs = body["opposite_differences"]
+        assert pairs is not None
+        assert len(pairs) == 6
+        assert [(p["first_hole"], p["opposite_hole"]) for p in pairs] == [
+            (k, k + 6) for k in range(6)
+        ]
+        # 已按绝对差值降序
+        absolutes = [abs(p["delta_g"]) for p in pairs]
+        assert absolutes == sorted(absolutes, reverse=True)
+
+    def test_pair_delta_is_first_minus_opposite_with_displays(self):
+        body = post(
+            {"tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 90}]}
+        ).json()
+        first = body["opposite_differences"][0]
+        assert first["first_hole"] == 0
+        assert first["opposite_hole"] == 6
+        assert first["delta_g"] == 10.0
+        assert first["delta_display"] == "10.00"
+        assert first["x_g"] == pytest.approx(10.0)
+        assert first["x_display"] == "10.00"
+        assert first["y_display"] == "0.00"
+
+    def test_six_pair_contributions_sum_to_response_resultant(self):
+        # 核心验收：六对贡献之和等于原合成分量（未舍入）
+        body = post(
+            {
+                "tubes": [
+                    {"hole": 0, "mass_g": 100},
+                    {"hole": 1, "mass_g": 70},
+                    {"hole": 6, "mass_g": 90},
+                    {"hole": 3, "mass_g": 10},
+                    {"hole": 10, "mass_g": 26},
+                ]
+            }
+        ).json()
+        pairs = body["opposite_differences"]
+        assert sum(p["x_g"] for p in pairs) == pytest.approx(body["x_g"], abs=1e-9)
+        assert sum(p["y_g"] for p in pairs) == pytest.approx(body["y_g"], abs=1e-9)
+
+    def test_equal_absolute_delta_ordered_by_smaller_hole(self):
+        # 对 0：Δ=+10；对 1：0 vs 10 → Δ=−10；并列时孔号 0 在前
+        body = post(
+            {
+                "tubes": [
+                    {"hole": 0, "mass_g": 100},
+                    {"hole": 6, "mass_g": 90},
+                    {"hole": 7, "mass_g": 10},
+                ]
+            }
+        ).json()
+        pairs = body["opposite_differences"]
+        assert [p["first_hole"] for p in pairs[:2]] == [0, 1]
+        assert pairs[0]["delta_g"] == 10.0
+        assert pairs[1]["delta_g"] == -10.0
+        assert pairs[1]["delta_display"] == "-10.00"
+
+    def test_pass_response_has_null_diagnostics(self):
+        body = post(valid_payload()).json()
+        assert body["balanced"] is True
+        assert body["opposite_differences"] is None
+
+    def test_diagnostics_do_not_affect_existing_fields(self):
+        # 既有请求体与判定、明细、建议字段保持原有行为
+        body = post(
+            {
+                "tubes": [
+                    {"hole": 0, "mass_g": 100},
+                    {"hole": 6, "mass_g": 100},
+                    {"hole": 3, "mass_g": 10},
+                ]
+            }
+        ).json()
+        assert body["balanced"] is False
+        assert body["residual_display"] == "10.00"
+        assert body["direction_display"] == "90.00"
+        assert body["suggestion"] == {
+            "hole": 9,
+            "mass_g": 10,
+            "predicted_residual_g": 0.0,
+            "predicted_residual_display": "0.00",
+        }
+        pairs = body["opposite_differences"]
+        assert pairs[0]["first_hole"] == 3
+        assert pairs[0]["delta_g"] == 10.0
+
+    def test_diagnostics_present_alongside_condition(self):
+        # 工况不影响诊断；诊断与离心力可同时出现
+        body = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 90}],
+                "condition": {"speed_rpm": 3000, "radius_mm": 100},
+            }
+        ).json()
+        assert body["condition"] is not None
+        assert body["condition"]["centrifugal_force_display"] == "98.70"
+        assert len(body["opposite_differences"]) == 6
+
+
 class TestValidation:
     def test_duplicate_hole_rejected(self):
         resp = post(

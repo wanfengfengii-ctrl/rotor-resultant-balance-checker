@@ -129,3 +129,33 @@ class TestLiveServer:
         assert any(
             e["loc"][-2:] == ["condition", "speed_rpm"] for e in detail
         )
+
+    def test_opposite_differences_over_http(self, http):
+        resp = http.post(
+            "/api/verify",
+            json={
+                "tubes": [
+                    {"hole": 0, "mass_g": 100},
+                    {"hole": 1, "mass_g": 70},
+                    {"hole": 6, "mass_g": 90},
+                ]
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["balanced"] is False
+        pairs = body["opposite_differences"]
+        assert len(pairs) == 6
+        # 六对贡献之和等于原合成分量
+        assert sum(p["x_g"] for p in pairs) == pytest.approx(body["x_g"], abs=1e-9)
+        assert sum(p["y_g"] for p in pairs) == pytest.approx(body["y_g"], abs=1e-9)
+        # 绝对差降序：对 1 差 70 居首，对 0 差 10 次之
+        assert [p["first_hole"] for p in pairs[:2]] == [1, 0]
+
+    def test_opposite_differences_null_on_pass_over_http(self, http):
+        resp = http.post(
+            "/api/verify",
+            json={"tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 100}]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["opposite_differences"] is None

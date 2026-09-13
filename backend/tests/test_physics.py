@@ -1,13 +1,16 @@
 """compute_resultant 与 round2_display 的单元测试。"""
 
 import math
+import random
 
 import pytest
 
 from app.physics import (
+    HOLE_COUNT,
     TOLERANCE_G,
     TubeLoad,
     centrifugal_force_n,
+    compute_opposite_differences,
     compute_resultant,
     direction_display,
     hole_angle_deg,
@@ -111,6 +114,90 @@ class TestContributions:
         assert c5.y_g == pytest.approx(200 * math.sin(math.radians(150)))
         assert result.x_g == pytest.approx(c1.x_g + c5.x_g)
         assert result.y_g == pytest.approx(c1.y_g + c5.y_g)
+
+
+class TestOppositeDifferences:
+    def test_six_pairs_pair_zero_with_five_and_opposite(self):
+        ds = compute_opposite_differences(loads((0, 100), (6, 100)))
+        assert [(d.first_hole, d.opposite_hole) for d in ds] == [
+            (k, k + 6) for k in range(6)
+        ]
+
+    def test_signed_delta_is_first_minus_opposite(self):
+        ds = {
+            d.first_hole: d
+            for d in compute_opposite_differences(loads((0, 100), (6, 90)))
+        }
+        assert ds[0].delta_g == 10.0
+        assert ds[0].first_mass_g == 100.0
+        assert ds[0].opposite_mass_g == 90.0
+
+        ds = {
+            d.first_hole: d
+            for d in compute_opposite_differences(loads((3, 10), (9, 50)))
+        }
+        assert ds[3].delta_g == -40.0
+
+    def test_empty_holes_count_as_zero_mass(self):
+        ds = {
+            d.first_hole: d
+            for d in compute_opposite_differences(loads((1, 70)))
+        }
+        assert ds[1].first_mass_g == 70.0
+        assert ds[1].opposite_mass_g == 0.0
+        assert ds[1].delta_g == 70.0
+        assert ds[2].delta_g == 0.0
+
+    def test_six_pair_contributions_sum_to_resultant(self):
+        # 核心恒等式：六对贡献之和等于原合成分量
+        result = compute_resultant(loads((0, 100), (1, 70), (6, 90), (3, 10)))
+        ds = compute_opposite_differences(loads((0, 100), (1, 70), (6, 90), (3, 10)))
+        assert sum(d.x_g for d in ds) == pytest.approx(result.x_g)
+        assert sum(d.y_g for d in ds) == pytest.approx(result.y_g)
+
+    def test_six_pair_identity_holds_for_random_integer_loads(self):
+        rng = random.Random(20260913)
+        for _ in range(200):
+            pairs = [
+                (hole, rng.randint(1, 500))
+                for hole in range(HOLE_COUNT)
+                if rng.random() < 0.6
+            ]
+            if len(pairs) < 2:
+                continue
+            ls = loads(*pairs)
+            result = compute_resultant(ls)
+            ds = compute_opposite_differences(ls)
+            assert len(ds) == 6
+            assert sum(d.x_g for d in ds) == pytest.approx(result.x_g, abs=1e-9)
+            assert sum(d.y_g for d in ds) == pytest.approx(result.y_g, abs=1e-9)
+
+    def test_sorted_by_absolute_delta_descending(self):
+        ds = compute_opposite_differences(
+            loads((0, 100), (6, 90), (1, 70), (3, 10), (9, 81))
+        )
+        deltas = [abs(d.delta_g) for d in ds]
+        assert deltas == sorted(deltas, reverse=True)
+        # |Δ|: 对 3 为 71、对 1 为 70、对 0 为 10，其余为 0
+        assert [d.first_hole for d in ds[:3]] == [3, 1, 0]
+
+    def test_equal_absolute_delta_stable_sort_by_smaller_hole(self):
+        # 对 0：100 vs 90 → Δ=+10；对 1：0 vs 10 → Δ=−10。绝对差相同，
+        # 较小孔号（0）必须排在前面，与差值正负无关
+        ds = compute_opposite_differences(loads((0, 100), (6, 90), (7, 10)))
+        assert abs(ds[0].delta_g) == abs(ds[1].delta_g) == 10.0
+        assert [d.first_hole for d in ds[:2]] == [0, 1]
+        assert ds[0].delta_g == 10.0
+        assert ds[1].delta_g == -10.0
+
+    def test_contribution_uses_first_hole_angle_with_signed_delta(self):
+        # 对 1（30°）Δ=70：贡献为 70·(cos30°, sin30°)
+        ds = {
+            d.first_hole: d
+            for d in compute_opposite_differences(loads((1, 70)))
+        }
+        assert ds[1].x_g == pytest.approx(70 * math.cos(math.radians(30)))
+        assert ds[1].y_g == pytest.approx(70 * math.sin(math.radians(30)))
 
 
 class TestDirectionDisplay:

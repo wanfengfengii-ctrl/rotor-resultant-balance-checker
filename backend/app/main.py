@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .models import (
     ContributionOut,
     OperatingConditionOut,
+    OppositeDifferenceOut,
     SuggestionOut,
     VerifyRequest,
     VerifyResponse,
@@ -18,6 +19,7 @@ from .physics import (
     TOLERANCE_G,
     TubeLoad,
     centrifugal_force_n,
+    compute_opposite_differences,
     compute_resultant,
     direction_display,
     round2_display,
@@ -71,6 +73,24 @@ def verify(request: VerifyRequest) -> VerifyResponse:
             centrifugal_force_n=force_n,
             centrifugal_force_display=round2_display(force_n),
         )
+    # 对置差异诊断仅随拒绝结果返回：放行面板不展开诊断
+    opposite_out = None
+    if not result.balanced:
+        opposite_out = [
+            OppositeDifferenceOut(
+                first_hole=d.first_hole,
+                opposite_hole=d.opposite_hole,
+                first_mass_g=d.first_mass_g,
+                opposite_mass_g=d.opposite_mass_g,
+                delta_g=d.delta_g,
+                delta_display=round2_display(d.delta_g),
+                x_g=d.x_g,
+                y_g=d.y_g,
+                x_display=round2_display(d.x_g),
+                y_display=round2_display(d.y_g),
+            )
+            for d in compute_opposite_differences(loads)
+        ]
     return VerifyResponse(
         balanced=result.balanced,
         verdict="放行" if result.balanced else "拒绝",
@@ -98,4 +118,5 @@ def verify(request: VerifyRequest) -> VerifyResponse:
         ],
         suggestion=suggestion,
         condition=condition_out,
+        opposite_differences=opposite_out,
     )

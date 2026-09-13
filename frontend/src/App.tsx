@@ -9,7 +9,11 @@ import {
   type ConditionField,
 } from "./lib/condition";
 import { buildTubes, countFilled, HOLE_COUNT } from "./lib/rotor";
-import type { BalanceSuggestion, VerifyResponse } from "./types";
+import type {
+  BalanceSuggestion,
+  OppositeDifference,
+  VerifyResponse,
+} from "./types";
 
 export default function App() {
   const [inputs, setInputs] = useState<string[]>(() => Array(HOLE_COUNT).fill(""));
@@ -23,6 +27,9 @@ export default function App() {
   >({});
   const [generalErrors, setGeneralErrors] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
+  // 对置差异诊断中被点选的孔对（以较小孔号标识）；随旧结果在任何录入修改、
+  // 应用建议、重新提交或请求失败时一起清除，绝不跨结果保留高亮
+  const [selectedPairHole, setSelectedPairHole] = useState<number | null>(null);
   // 载荷版本号：任何录入修改（孔位或工况）都同步递增（ref 不等待重渲染）。
   // 核验响应返回时若版本已变，说明载荷在飞行途中被改过，
   // 该次响应（结论 / 建议 / 422 错误）一律作废，以当前载荷重新核验为准。
@@ -33,6 +40,7 @@ export default function App() {
     loadVersionRef.current += 1;
     setInputs((prev) => prev.map((v, i) => (i === hole ? value : v)));
     setResult(null);
+    setSelectedPairHole(null);
     setFieldErrors({});
     setConditionErrors({});
     setGeneralErrors([]);
@@ -48,6 +56,7 @@ export default function App() {
         setRadiusInput(value);
       }
       setResult(null);
+      setSelectedPairHole(null);
       setFieldErrors({});
       setConditionErrors({});
       setGeneralErrors([]);
@@ -61,6 +70,7 @@ export default function App() {
     setSpeedInput("");
     setRadiusInput("");
     setResult(null);
+    setSelectedPairHole(null);
     setFieldErrors({});
     setConditionErrors({});
     setGeneralErrors([]);
@@ -82,14 +92,24 @@ export default function App() {
       );
     });
     setResult(null);
+    setSelectedPairHole(null);
     setFieldErrors({});
     setConditionErrors({});
     setGeneralErrors([]);
   }, []);
 
+  // 点选拒绝面板中的对置差异：转子图只高亮该对两孔；再次点选同一对取消高亮。
+  // 高亮仅与当前拒绝结果绑定，任何使结果失效的操作都会在别处清除该状态。
+  const handleSelectPair = useCallback((pair: OppositeDifference) => {
+    setSelectedPairHole((prev) =>
+      prev === pair.first_hole ? null : pair.first_hole,
+    );
+  }, []);
+
   const handleSubmit = useCallback(async () => {
     // 每次提交都先清空旧结论：失败时只显示错误
     setResult(null);
+    setSelectedPairHole(null);
     setFieldErrors({});
     setConditionErrors({});
     setGeneralErrors([]);
@@ -138,6 +158,24 @@ export default function App() {
 
   const filled = useMemo(() => countFilled(inputs), [inputs]);
 
+  // 当前点选的孔对仅在当前结果的诊断中有效；结果失效后即为 null
+  const selectedPair = useMemo(
+    () =>
+      result?.opposite_differences?.find(
+        (pair) => pair.first_hole === selectedPairHole,
+      ) ?? null,
+    [result, selectedPairHole],
+  );
+  const highlightedHoles = useMemo<ReadonlySet<number> | null>(() => {
+    if (!selectedPair) {
+      return null;
+    }
+    return new Set<number>([
+      selectedPair.first_hole,
+      selectedPair.opposite_hole,
+    ]);
+  }, [selectedPair]);
+
   return (
     <div className="page">
       <header className="page-header">
@@ -153,6 +191,7 @@ export default function App() {
             inputs={inputs}
             fieldErrors={fieldErrors}
             result={result}
+            highlightedHoles={highlightedHoles}
             onChange={handleChange}
           />
           <ConditionInputs
@@ -187,7 +226,12 @@ export default function App() {
           )}
         </section>
 
-        <ResultPanel result={result} onApplySuggestion={handleApplySuggestion} />
+        <ResultPanel
+          result={result}
+          onApplySuggestion={handleApplySuggestion}
+          onSelectPair={handleSelectPair}
+          selectedFirstHole={selectedPairHole}
+        />
       </main>
     </div>
   );

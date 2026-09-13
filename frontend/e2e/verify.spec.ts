@@ -217,6 +217,214 @@ test("响应返回前修正越界质量：过期的校验错误被丢弃，新�
   await expect(page.getByTestId("verdict")).toHaveText("放行");
 });
 
+test.describe("对置差异诊断", () => {
+  test("拒绝时展示差异最大的三对及贡献，放行时不展开", async ({ page }) => {
+    await page.getByTestId("mass-input-3").fill("81");
+    await page.getByTestId("mass-input-1").fill("70");
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByTestId("mass-input-10").fill("26");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("verdict")).toHaveText("拒绝");
+    const diagnostics = page.getByTestId("opposite-diagnostics");
+    await expect(diagnostics).toBeVisible();
+    // 只展示前三对，顺序为按绝对差降序：对 3（71）、对 1（70）、对 4（26）
+    const shown = page.locator("button[data-testid^='opposite-pair-']");
+    await expect(shown).toHaveCount(3);
+    await expect(shown.nth(0)).toHaveAttribute("data-testid", "opposite-pair-3");
+    await expect(shown.nth(1)).toHaveAttribute("data-testid", "opposite-pair-1");
+    await expect(shown.nth(2)).toHaveAttribute("data-testid", "opposite-pair-4");
+    await expect(page.getByTestId("pair-delta-3")).toContainText("+81.00");
+    await expect(page.getByTestId("opposite-pair-3")).toContainText("X");
+    await expect(page.getByTestId("opposite-pair-3")).toContainText("Y");
+
+    // 放行结果不展开诊断：补齐各对置孔使六对差值归零
+    await page.getByTestId("mass-input-9").fill("81");
+    await page.getByTestId("mass-input-7").fill("70");
+    await page.getByTestId("mass-input-6").fill("100");
+    await page.getByTestId("mass-input-4").fill("26");
+    await page.getByRole("button", { name: "核验" }).click();
+    await expect(page.getByTestId("verdict")).toHaveText("放行");
+    await expect(page.getByTestId("opposite-diagnostics")).toHaveCount(0);
+  });
+
+  test("点选一对：转子图只高亮对应两孔，切换与再次点选生效", async ({ page }) => {
+    await page.getByTestId("mass-input-3").fill("81");
+    await page.getByTestId("mass-input-1").fill("70");
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    // 初始无高亮
+    await expect(page.locator("[data-pair-highlight='true']")).toHaveCount(0);
+    await expect(page.getByTestId("pair-link")).toHaveCount(0);
+
+    await page.getByTestId("opposite-pair-3").click();
+    let highlighted = page.locator("[data-pair-highlight='true']");
+    await expect(highlighted).toHaveCount(2);
+    await expect(page.getByTestId("hole-3")).toHaveAttribute(
+      "data-pair-highlight",
+      "true",
+    );
+    await expect(page.getByTestId("hole-9")).toHaveAttribute(
+      "data-pair-highlight",
+      "true",
+    );
+    // 其余孔位不高亮
+    await expect(page.getByTestId("hole-0")).not.toHaveAttribute(
+      "data-pair-highlight",
+    );
+    // 两孔之间画一条穿过圆心的连线（水平连线的几何包围盒高度为 0，按存在性断言）
+    await expect(page.getByTestId("pair-link")).toHaveCount(1);
+    await expect(page.getByTestId("opposite-pair-3")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    // 切换到另一对：只剩新的两孔高亮
+    await page.getByTestId("opposite-pair-1").click();
+    highlighted = page.locator("[data-pair-highlight='true']");
+    await expect(highlighted).toHaveCount(2);
+    await expect(page.getByTestId("hole-1")).toHaveAttribute(
+      "data-pair-highlight",
+      "true",
+    );
+    await expect(page.getByTestId("hole-7")).toHaveAttribute(
+      "data-pair-highlight",
+      "true",
+    );
+    await expect(page.getByTestId("hole-3")).not.toHaveAttribute(
+      "data-pair-highlight",
+    );
+
+    // 再次点选当前对：取消高亮
+    await page.getByTestId("opposite-pair-1").click();
+    await expect(page.locator("[data-pair-highlight='true']")).toHaveCount(0);
+    await expect(page.getByTestId("pair-link")).toHaveCount(0);
+  });
+
+  test("修改任一质量后高亮与旧结果一起清除", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByRole("button", { name: "核验" }).click();
+    await page.getByTestId("opposite-pair-0").click();
+    await expect(page.locator("[data-pair-highlight='true']")).toHaveCount(2);
+
+    await page.getByTestId("mass-input-6").fill("95");
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+    await expect(page.locator("[data-pair-highlight='true']")).toHaveCount(0);
+    await expect(page.getByTestId("pair-link")).toHaveCount(0);
+  });
+
+  test("应用配平建议后高亮与旧结果一起清除", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("100");
+    await page.getByTestId("mass-input-3").fill("10");
+    await page.getByRole("button", { name: "核验" }).click();
+    await expect(page.getByTestId("verdict")).toHaveText("拒绝");
+
+    // 差异最大的一对为孔 3 ↔ 孔 9
+    await page.getByTestId("opposite-pair-3").click();
+    await expect(page.locator("[data-pair-highlight='true']")).toHaveCount(2);
+
+    await page.getByTestId("apply-suggestion").click();
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+    await expect(page.locator("[data-pair-highlight='true']")).toHaveCount(0);
+    await expect(page.getByTestId("pair-link")).toHaveCount(0);
+    await expect(page.getByTestId("mass-input-9")).toHaveValue("10");
+  });
+
+  test("提交校验失败时不保留诊断高亮", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByRole("button", { name: "核验" }).click();
+    await page.getByTestId("opposite-pair-0").click();
+    await expect(page.locator("[data-pair-highlight='true']")).toHaveCount(2);
+
+    // 改为越界质量后提交：只显示错误，旧结果与高亮均消失
+    await page.getByTestId("mass-input-0").fill("600");
+    await page.getByRole("button", { name: "核验" }).click();
+    await expect(page.getByTestId("error-0")).toBeVisible();
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+    await expect(page.getByTestId("opposite-diagnostics")).toHaveCount(0);
+    await expect(page.locator("[data-pair-highlight='true']")).toHaveCount(0);
+  });
+
+  test("网络失败时不保留诊断高亮，恢复后重新核验正常", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByRole("button", { name: "核验" }).click();
+    await page.getByTestId("opposite-pair-0").click();
+    await expect(page.locator("[data-pair-highlight='true']")).toHaveCount(2);
+
+    // 下一次核验请求直接失败：旧结果与高亮被清除，错误提示保留
+    await page.route("**/api/verify", (route) => route.abort("failed"));
+    await page.getByRole("button", { name: "核验" }).click();
+    await expect(page.getByTestId("general-errors")).toBeVisible();
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+    await expect(page.locator("[data-pair-highlight='true']")).toHaveCount(0);
+    await expect(page.getByTestId("pair-link")).toHaveCount(0);
+
+    await page.unroute("**/api/verify");
+    await page.getByRole("button", { name: "核验" }).click();
+    await expect(page.getByTestId("verdict")).toHaveText("拒绝");
+    await expect(page.locator("[data-pair-highlight='true']")).toHaveCount(0);
+    // 新结果出来后可以重新点选
+    await page.getByTestId("opposite-pair-0").click();
+    await expect(page.locator("[data-pair-highlight='true']")).toHaveCount(2);
+  });
+
+  test("绝对差并列时按较小孔号排序", async ({ page }) => {
+    // 对 0：100 vs 90 → +10；对 1：空 vs 10 → −10；其余为 0
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByTestId("mass-input-7").fill("10");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    const shown = page.locator("button[data-testid^='opposite-pair-']");
+    await expect(shown.nth(0)).toHaveAttribute("data-testid", "opposite-pair-0");
+    await expect(shown.nth(1)).toHaveAttribute("data-testid", "opposite-pair-1");
+  });
+
+  test("旧版响应缺少诊断字段时仍正常显示结论", async ({ page }) => {
+    await page.route("**/api/verify", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      delete body.opposite_differences;
+      await route.fulfill({ response, json: body });
+    });
+
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("verdict")).toHaveText("拒绝");
+    await expect(page.getByTestId("residual")).toHaveText("10.00");
+    await expect(page.getByTestId("opposite-diagnostics")).toHaveCount(0);
+  });
+
+  test("飞行途中修改孔位：过期拒绝响应不回填诊断与高亮", async ({ page }) => {
+    await delayVerifyApi(page, 600);
+
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    // 响应返回前修改孔位
+    await page.getByTestId("mass-input-6").fill("100");
+    await page.waitForTimeout(1200);
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+    await expect(page.getByTestId("opposite-diagnostics")).toHaveCount(0);
+    await expect(page.locator("[data-pair-highlight='true']")).toHaveCount(0);
+
+    // 按当前载荷核验：放行，无诊断
+    await page.getByRole("button", { name: "核验" }).click();
+    await expect(page.getByTestId("verdict")).toHaveText("放行");
+    await expect(page.getByTestId("opposite-diagnostics")).toHaveCount(0);
+  });
+});
+
 test.describe("可选工况与离心力", () => {
   test("不填工况时结果面板无工况区，核验行为与原来一致", async ({ page }) => {
     await page.getByTestId("mass-input-0").fill("100");

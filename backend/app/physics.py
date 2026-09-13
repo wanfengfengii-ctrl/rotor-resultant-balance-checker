@@ -114,6 +114,56 @@ class RotorResult:
     contributions: Tuple[Contribution, ...]
 
 
+@dataclass(frozen=True)
+class OppositeDifference:
+    """一对对置孔（k 与 k+6）的质量差诊断。
+
+    delta_g = m_k − m_(k+6)（空孔按 0 克）；该有符号差值在 k 的固定角度上
+    形成的矢量贡献为 (delta_g·cos θ_k, delta_g·sin θ_k)。六对贡献之和恒等于
+    全体载荷的合成分量 (X, Y)，因为第 k+6 孔的方向恰为 θ_k+180°。
+    """
+
+    first_hole: int  # 0..5
+    opposite_hole: int  # first_hole + 6
+    first_mass_g: float
+    opposite_mass_g: float
+    delta_g: float
+    x_g: float
+    y_g: float
+
+
+def compute_opposite_differences(
+    loads: Iterable[TubeLoad],
+) -> Tuple[OppositeDifference, ...]:
+    """把 0–5 号孔与其对面的 6–11 号孔组成六对，计算有符号质量差及其分量贡献。
+
+    按绝对差值从大到小排序，供拒绝面板优先展示“最值得复查”的对置孔；
+    绝对差相同时以较小孔号（first_hole）升序稳定决胜。
+    """
+    masses = {load.hole: load.mass_g for load in loads}
+    differences = []
+    for first in range(HOLE_COUNT // 2):
+        opposite = first + HOLE_COUNT // 2
+        first_mass = masses.get(first, 0.0)
+        opposite_mass = masses.get(opposite, 0.0)
+        delta = first_mass - opposite_mass
+        theta = math.radians(hole_angle_deg(first))
+        differences.append(
+            OppositeDifference(
+                first_hole=first,
+                opposite_hole=opposite,
+                first_mass_g=first_mass,
+                opposite_mass_g=opposite_mass,
+                delta_g=delta,
+                x_g=delta * math.cos(theta),
+                y_g=delta * math.sin(theta),
+            )
+        )
+    # 绝对差降序；并列时较小孔号升序
+    differences.sort(key=lambda d: (-abs(d.delta_g), d.first_hole))
+    return tuple(differences)
+
+
 def compute_resultant(loads: Iterable[TubeLoad]) -> RotorResult:
     """合成所有试管的质量矢量并给出判定结果（判定用未舍入值）。"""
     x = 0.0

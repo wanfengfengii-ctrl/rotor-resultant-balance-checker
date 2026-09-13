@@ -1,11 +1,37 @@
-import type { BalanceSuggestion, VerifyResponse } from "../types";
+import type {
+  BalanceSuggestion,
+  OppositeDifference,
+  VerifyResponse,
+} from "../types";
 
 interface ResultPanelProps {
   result: VerifyResponse | null;
   onApplySuggestion?: (suggestion: BalanceSuggestion) => void;
+  /** 点选对置差异诊断中的某一对；再次点选同一对可取消 */
+  onSelectPair?: (pair: OppositeDifference) => void;
+  /** 当前高亮对置孔对的较小孔号；null 表示未选择 */
+  selectedFirstHole?: number | null;
 }
 
-export function ResultPanel({ result, onApplySuggestion }: ResultPanelProps) {
+/** 拒绝面板展示差异最大的前三对 */
+const TOP_PAIR_COUNT = 3;
+
+function pairBiasHint(pair: OppositeDifference): string {
+  if (pair.delta_g > 0) {
+    return `孔 ${pair.first_hole} 偏重`;
+  }
+  if (pair.delta_g < 0) {
+    return `孔 ${pair.opposite_hole} 偏重`;
+  }
+  return "对置等质量";
+}
+
+export function ResultPanel({
+  result,
+  onApplySuggestion,
+  onSelectPair,
+  selectedFirstHole,
+}: ResultPanelProps) {
   if (!result) {
     return (
       <section className="result-panel empty" data-testid="result-empty">
@@ -64,6 +90,45 @@ export function ResultPanel({ result, onApplySuggestion }: ResultPanelProps) {
             无法通过单支试管（1–500 g）配平，请调整现有试管后重新核验。
           </p>
         ))}
+
+      {!result.balanced &&
+        Array.isArray(result.opposite_differences) &&
+        result.opposite_differences.length > 0 && (
+          <div className="opposite-diagnostics" data-testid="opposite-diagnostics">
+            <p className="opposite-title">
+              对置差异诊断：差异最大的三对，点选后在转子图高亮对应两孔
+            </p>
+            <ul>
+              {result.opposite_differences.slice(0, TOP_PAIR_COUNT).map((pair) => {
+                const selected = selectedFirstHole === pair.first_hole;
+                return (
+                  <li key={pair.first_hole}>
+                    <button
+                      type="button"
+                      className={`pair-row${selected ? " selected" : ""}`}
+                      data-testid={`opposite-pair-${pair.first_hole}`}
+                      aria-pressed={selected}
+                      onClick={() => onSelectPair?.(pair)}
+                    >
+                      <span className="pair-holes">
+                        孔 {pair.first_hole}（{pair.first_mass_g} g）↔ 孔{" "}
+                        {pair.opposite_hole}（{pair.opposite_mass_g} g）
+                      </span>
+                      <span className="pair-delta" data-testid={`pair-delta-${pair.first_hole}`}>
+                        差 {pair.delta_g > 0 ? "+" : ""}
+                        {pair.delta_display} g
+                      </span>
+                      <span className="pair-contrib">
+                        X {pair.x_display} / Y {pair.y_display}
+                      </span>
+                      <span className="pair-hint">{pairBiasHint(pair)}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
 
       <dl className="summary">
         <div>

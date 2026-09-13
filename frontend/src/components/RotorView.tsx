@@ -5,6 +5,8 @@ interface RotorViewProps {
   inputs: string[];
   fieldErrors: Record<number, string>;
   result: VerifyResponse | null;
+  /** 点选对置差异诊断后需要高亮的一对孔；null 时不高亮 */
+  highlightedHoles: ReadonlySet<number> | null;
   onChange: (hole: number, value: string) => void;
 }
 
@@ -21,12 +23,32 @@ function holePosition(hole: number): { left: string; top: string } {
   return { left: `${left}%`, top: `${top}%` };
 }
 
-export function RotorView({ inputs, fieldErrors, result, onChange }: RotorViewProps) {
+/** 孔位在 SVG 坐标系（与转子图同一映射）中的位置 */
+function svgPoint(hole: number): { x: number; y: number } {
+  const rad = (30 * hole * Math.PI) / 180;
+  return { x: SVG_RADIUS * Math.sin(rad), y: -SVG_RADIUS * Math.cos(rad) };
+}
+
+export function RotorView({
+  inputs,
+  fieldErrors,
+  result,
+  highlightedHoles,
+  onChange,
+}: RotorViewProps) {
   // 物理分量 (X, Y) → 屏幕 (Y, −X)：与“0 号孔在正上方、编号顺时针”的排布保持一致
   let arrow: { x: number; y: number } | null = null;
   if (result && result.direction_deg !== null && result.residual_g > 0) {
     const scale = ARROW_MAX / result.residual_g;
     arrow = { x: result.y_g * scale, y: -result.x_g * scale };
+  }
+
+  // 高亮的两孔恰为对置孔：取前两个编号画一条穿过圆心的连线
+  let pairLink: { a: { x: number; y: number }; b: { x: number; y: number } } | null =
+    null;
+  if (highlightedHoles && highlightedHoles.size === 2) {
+    const [h1, h2] = [...highlightedHoles];
+    pairLink = { a: svgPoint(h1), b: svgPoint(h2) };
   }
 
   return (
@@ -45,15 +67,27 @@ export function RotorView({ inputs, fieldErrors, result, onChange }: RotorViewPr
           </marker>
         </defs>
         <circle className="rotor-ring" cx="0" cy="0" r={SVG_RADIUS} />
+        {pairLink && (
+          <line
+            data-testid="pair-link"
+            className="pair-link"
+            x1={pairLink.a.x}
+            y1={pairLink.a.y}
+            x2={pairLink.b.x}
+            y2={pairLink.b.y}
+          />
+        )}
         {Array.from({ length: HOLE_COUNT }, (_, k) => {
           const rad = (30 * k * Math.PI) / 180;
           return (
             <circle
               key={k}
-              className="rotor-dot"
+              className={`rotor-dot${
+                highlightedHoles?.has(k) ? " pair-highlight" : ""
+              }`}
               cx={SVG_RADIUS * Math.sin(rad)}
               cy={-SVG_RADIUS * Math.cos(rad)}
-              r="3"
+              r={highlightedHoles?.has(k) ? 5 : 3}
             />
           );
         })}
@@ -84,12 +118,16 @@ export function RotorView({ inputs, fieldErrors, result, onChange }: RotorViewPr
       {Array.from({ length: HOLE_COUNT }, (_, k) => {
         const error = fieldErrors[k];
         const filled = inputs[k].trim() !== "" && inputs[k].trim() !== "0";
+        const highlighted = highlightedHoles?.has(k) ?? false;
         return (
           <div
             key={k}
-            className={`hole${filled ? " filled" : ""}${error ? " has-error" : ""}`}
+            className={`hole${filled ? " filled" : ""}${
+              error ? " has-error" : ""
+            }${highlighted ? " pair-highlight" : ""}`}
             style={holePosition(k)}
             data-testid={`hole-${k}`}
+            data-pair-highlight={highlighted ? "true" : undefined}
           >
             <label htmlFor={`mass-input-${k}`}>孔 {k}</label>
             <input

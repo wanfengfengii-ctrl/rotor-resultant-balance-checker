@@ -119,6 +119,21 @@ class OperatingConditionOut(BaseModel):
     centrifugal_force_display: str
 
 
+class OppositeDifferenceOut(BaseModel):
+    """一对对置孔（first_hole 与 opposite_hole）的有符号质量差及其分量贡献。"""
+
+    first_hole: int
+    opposite_hole: int
+    first_mass_g: float
+    opposite_mass_g: float
+    delta_g: float
+    delta_display: str
+    x_g: float
+    y_g: float
+    x_display: str
+    y_display: str
+
+
 class VerifyResponse(BaseModel):
     balanced: bool
     verdict: str  # “放行” 或 “拒绝”
@@ -136,3 +151,6 @@ class VerifyResponse(BaseModel):
     suggestion: Optional[SuggestionOut] = None
     # 仅在请求带完整工况（转速 + 有效半径）时非空；省略工况时为 null
     condition: Optional[OperatingConditionOut] = None
+    # 对置差异诊断（可选，兼容旧版调用方）：仅拒绝时给出按绝对差值降序、
+    # 并列时较小孔号升序排列的六对结果；放行时为 null
+    opposite_differences: Optional[List[OppositeDifferenceOut]] = None
