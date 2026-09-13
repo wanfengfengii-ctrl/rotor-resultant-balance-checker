@@ -11,6 +11,7 @@ from app.physics import (
     direction_display,
     hole_angle_deg,
     round2_display,
+    suggest_balance,
 )
 
 
@@ -134,6 +135,59 @@ class TestDirectionDisplay:
     )
     def test_display_stays_in_0_to_360_exclusive(self, value, expected):
         assert direction_display(value) == expected
+
+
+class TestSuggestBalance:
+    def test_unique_optimal_suggestion(self):
+        # 残余 10 g 沿 +Y（孔 3 方向），唯一能在对置孔 9 加 10 g 精确抵消
+        suggestion = suggest_balance(loads((0, 100), (6, 100), (3, 10)))
+        assert suggestion is not None
+        assert suggestion.hole == 9
+        assert suggestion.mass_g == 10
+        assert suggestion.predicted_residual_g == 0.0
+
+    def test_tie_broken_by_smaller_hole(self):
+        # 孔 8 与孔 9 各加 14 g 的预测残余数学相等（浮点差 ~1e-14）：
+        # 并列时质量相同，取孔号较小者
+        suggestion = suggest_balance(loads((0, 100), (6, 100), (1, 10), (4, 10)))
+        assert suggestion is not None
+        assert (suggestion.hole, suggestion.mass_g) == (8, 14)
+        assert suggestion.predicted_residual_g <= TOLERANCE_G
+
+    def test_tie_broken_by_smaller_mass(self):
+        # 孔 9 加 5 g 与加 6 g 的预测残余数学相等（均为 1.0，浮点互有噪声）：
+        # 并列时取质量较小者
+        suggestion = suggest_balance(loads((0, 100), (6, 100), (1, 1), (3, 5)))
+        assert suggestion is not None
+        assert (suggestion.hole, suggestion.mass_g) == (9, 5)
+        assert suggestion.predicted_residual_g == pytest.approx(1.0)
+
+    def test_prediction_matches_verdict_after_applying(self):
+        # 预测残余量与“应用建议后再核验”走同一条计算链路，结论必须一致
+        base = loads((0, 100), (6, 100), (3, 10))
+        suggestion = suggest_balance(base)
+        assert suggestion is not None
+        applied = compute_resultant(
+            [*base, TubeLoad(hole=suggestion.hole, mass_g=suggestion.mass_g)]
+        )
+        assert applied.residual_g == suggestion.predicted_residual_g
+        assert applied.balanced is True
+
+    def test_suggestion_returned_at_threshold_boundary(self):
+        # 唯一可行候选的预测残余 ≈5.0 g（未超阈值）仍应返回
+        suggestion = suggest_balance(loads((0, 100), (6, 100), (1, 10), (10, 5)))
+        assert suggestion is not None
+        assert (suggestion.hole, suggestion.mass_g) == (7, 10)
+        assert suggestion.predicted_residual_g <= TOLERANCE_G
+
+    def test_no_suggestion_when_all_candidates_exceed_threshold(self):
+        # 对置孔 6 被占用，最近空孔加管也只能压到 ~5.01 g
+        assert suggest_balance(loads((0, 100), (6, 90))) is None
+
+    def test_no_suggestion_without_empty_hole(self):
+        full = loads(*[(k, 100) for k in range(11)], (11, 120))
+        assert compute_resultant(full).balanced is False
+        assert suggest_balance(full) is None
 
 
 class TestRound2Display:

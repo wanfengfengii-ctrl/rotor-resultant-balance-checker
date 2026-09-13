@@ -50,6 +50,33 @@ class TestLiveServer:
         assert body["balanced"] is False
         assert body["residual_display"] == "10.00"
 
+    def test_rejection_suggestion_over_http(self, http):
+        resp = http.post(
+            "/api/verify",
+            json={
+                "tubes": [
+                    {"hole": 0, "mass_g": 100},
+                    {"hole": 6, "mass_g": 100},
+                    {"hole": 3, "mass_g": 10},
+                ]
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["balanced"] is False
+        assert body["suggestion"] is not None
+        assert body["suggestion"]["hole"] == 9
+        assert body["suggestion"]["mass_g"] == 10
+        assert body["suggestion"]["predicted_residual_display"] == "0.00"
+
+    def test_no_feasible_suggestion_over_http(self, http):
+        resp = http.post(
+            "/api/verify",
+            json={"tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 90}]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["suggestion"] is None
+
     def test_validation_error_over_http(self, http):
         resp = http.post(
             "/api/verify",

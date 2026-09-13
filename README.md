@@ -2,6 +2,8 @@
 
 高速离心前的偏载核验：操作员录入 12 孔转子上各试管的整数克数，后端合成残余
 不平衡量并给出唯一结论（放行 / 拒绝），前端展示每个非空孔的贡献、合成方向与结论。
+核验被拒绝时，后端还会尝试给出一次加管即可放行的配平建议，操作员可一键应用后
+重新核验。
 
 ## 计算公式与判定规则
 
@@ -24,6 +26,22 @@ R = √(X² + Y²)          ← 残余量（克）
   展示层再次归一为 `0.00`。
 - 页面按顺时针展示孔位（0 号孔在正上方，编号顺时针递增）；为与画面一致，
   合成矢量箭头按 `(X, Y) → (Y, −X)` 映射绘制，方向角数值仍按上述数学约定报告。
+
+## 配平建议（拒绝时）
+
+核验结论为拒绝时，后端在同一计算链路中遍历**所有空孔 × 1–500 克整数质量**，
+逐一用 `compute_resultant` 预测加入单支试管后的残余量：
+
+- 以**预测残余量最小**为目标；差异低于 1e-9 视为并列，依次按**质量较小、
+  孔号较小**稳定决胜（数学上相等的残余在浮点上可能有 ~1e-14 噪声，不能
+  直接比较浮点值）。
+- 仅当最优预测值**不超过 5.00 g** 时，建议才随响应的 `suggestion` 字段返回；
+  没有空孔或所有候选仍超限时 `suggestion` 为 `null`。
+- 预测与正式判定走同一条计算链路，应用建议后的核验结论与预测值一致。
+
+前端在拒绝结果旁展示建议孔位、质量与预测残余量；点击「应用建议」把质量写入
+对应空孔并清除旧结论，操作员再点击「核验」取得最终结论。无可行建议时页面明确
+提示无法通过单支试管配平，并保留本次拒绝明细。
 
 ## 校验规则（API 强制）
 
@@ -117,13 +135,18 @@ cd frontend && PLAYWRIGHT_BASE_URL=http://localhost:5173 npx playwright test
       "x_display": "100.00", "y_display": "0.00" },
     { "hole": 6, "mass_g": 90, "x_g": -90.0, "y_g": 1.1e-14,
       "x_display": "-90.00", "y_display": "0.00" }
-  ]
+  ],
+  "suggestion": null
 }
 ```
 
 - `*_g` / `direction_deg` 为未舍入原始值；`*_display` 为两位小数十进制四舍五入
   字符串；零残余量时 `direction_deg = null`、`direction_display = "无"`。
 - `contributions` 按提交顺序列出每个非空孔对 X、Y 分量的贡献。
+- `suggestion` 为可空字段（兼容既有调用方）：仅「拒绝且存在一次加管即可放行
+  的候选」时非空，形如
+  `{ "hole": 9, "mass_g": 10, "predicted_residual_g": 0.0, "predicted_residual_display": "0.00" }`；
+  放行、没有空孔或所有候选仍超限时应答为 `null`。
 - 校验失败返回 422，`detail` 为逐字段错误列表。
 
 `GET /api/health` → `{ "status": "ok" }`
@@ -132,7 +155,7 @@ cd frontend && PLAYWRIGHT_BASE_URL=http://localhost:5173 npx playwright test
 
 ```
 backend/            FastAPI 应用
-  app/physics.py    残余量、方向、舍入（唯一计算实现）
+  app/physics.py    残余量、方向、舍入与配平建议（唯一计算实现）
   app/models.py     Pydantic 请求/响应与校验规则
   app/main.py       路由与 CORS
   tests/            pytest：计算、API、活服务联调

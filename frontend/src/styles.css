@@ -272,6 +272,41 @@ button:disabled {
   background: var(--fail);
 }
 
+/* ---------- 配平建议 ---------- */
+
+.suggestion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  border: 1px solid var(--accent);
+  background: rgba(77, 163, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+}
+
+.suggestion-text {
+  margin: 0;
+  flex: 1 1 240px;
+  font-size: 0.92rem;
+}
+
+.suggestion-text strong {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.suggestion-none {
+  margin: 0 0 14px;
+  border: 1px solid var(--fail);
+  background: rgba(229, 83, 75, 0.1);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: var(--fail);
+  font-size: 0.9rem;
+}
+
 .summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));

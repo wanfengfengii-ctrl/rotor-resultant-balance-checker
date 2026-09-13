@@ -1,10 +1,11 @@
-import type { VerifyResponse } from "../types";
+import type { BalanceSuggestion, VerifyResponse } from "../types";
 
 interface ResultPanelProps {
   result: VerifyResponse | null;
+  onApplySuggestion?: (suggestion: BalanceSuggestion) => void;
 }
 
-export function ResultPanel({ result }: ResultPanelProps) {
+export function ResultPanel({ result, onApplySuggestion }: ResultPanelProps) {
   if (!result) {
     return (
       <section className="result-panel empty" data-testid="result-empty">
@@ -21,6 +22,29 @@ export function ResultPanel({ result }: ResultPanelProps) {
       >
         {result.verdict}
       </div>
+
+      {!result.balanced &&
+        (result.suggestion ? (
+          <div className="suggestion" data-testid="suggestion">
+            <p className="suggestion-text">
+              配平建议：在空孔 <strong>{result.suggestion.hole}</strong> 加入{" "}
+              <strong>{result.suggestion.mass_g} g</strong> 试管，预测残余量{" "}
+              <strong>{result.suggestion.predicted_residual_display} g</strong>
+            </p>
+            <button
+              type="button"
+              className="primary"
+              data-testid="apply-suggestion"
+              onClick={() => onApplySuggestion?.(result.suggestion!)}
+            >
+              应用建议
+            </button>
+          </div>
+        ) : (
+          <p className="suggestion-none" data-testid="suggestion-none">
+            无法通过单支试管（1–500 g）配平，请调整现有试管后重新核验。
+          </p>
+        ))}
 
       <dl className="summary">
         <div>

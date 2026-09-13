@@ -87,6 +87,64 @@ class TestHappyPath:
         assert 0.0 <= body["direction_deg"] < 360.0
 
 
+class TestSuggestion:
+    def test_rejection_includes_actionable_suggestion(self):
+        resp = post(
+            {
+                "tubes": [
+                    {"hole": 0, "mass_g": 100},
+                    {"hole": 6, "mass_g": 100},
+                    {"hole": 3, "mass_g": 10},
+                ]
+            }
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["balanced"] is False
+        assert body["verdict"] == "拒绝"
+        suggestion = body["suggestion"]
+        assert suggestion is not None
+        assert suggestion["hole"] == 9
+        assert suggestion["mass_g"] == 10
+        assert suggestion["predicted_residual_g"] == 0.0
+        assert suggestion["predicted_residual_display"] == "0.00"
+
+    def test_suggestion_prediction_matches_applied_verdict(self):
+        # 应用建议后的载荷再次核验：必须放行，且残余量与预测值一致
+        tubes = [
+            {"hole": 0, "mass_g": 100},
+            {"hole": 6, "mass_g": 100},
+            {"hole": 3, "mass_g": 10},
+        ]
+        suggestion = post({"tubes": tubes}).json()["suggestion"]
+        applied = post({"tubes": [*tubes, {"hole": suggestion["hole"], "mass_g": suggestion["mass_g"]}]})
+        body = applied.json()
+        assert body["balanced"] is True
+        assert body["verdict"] == "放行"
+        assert body["residual_g"] == suggestion["predicted_residual_g"]
+
+    def test_suggestion_null_when_single_tube_cannot_balance(self):
+        resp = post({"tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 90}]})
+        body = resp.json()
+        assert body["balanced"] is False
+        assert body["suggestion"] is None
+        # 拒绝明细不受影响
+        assert body["residual_display"] == "10.00"
+        assert body["direction_display"] == "0.00"
+
+    def test_suggestion_null_when_no_empty_hole(self):
+        tubes = [{"hole": k, "mass_g": 100} for k in range(11)]
+        tubes.append({"hole": 11, "mass_g": 120})
+        body = post({"tubes": tubes}).json()
+        assert body["balanced"] is False
+        assert body["suggestion"] is None
+
+    def test_pass_response_has_null_suggestion(self):
+        body = post(valid_payload()).json()
+        assert body["balanced"] is True
+        assert body["suggestion"] is None
+
+
 class TestValidation:
     def test_duplicate_hole_rejected(self):
         resp = post(

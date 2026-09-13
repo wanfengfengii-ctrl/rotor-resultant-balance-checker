@@ -4,7 +4,7 @@ import { RotorView } from "./components/RotorView";
 import { ResultPanel } from "./components/ResultPanel";
 import { ApiValidationError, mapValidationErrors } from "./lib/errors";
 import { buildTubes, countFilled, HOLE_COUNT } from "./lib/rotor";
-import type { VerifyResponse } from "./types";
+import type { BalanceSuggestion, VerifyResponse } from "./types";
 
 export default function App() {
   const [inputs, setInputs] = useState<string[]>(() => Array(HOLE_COUNT).fill(""));
@@ -23,6 +23,17 @@ export default function App() {
 
   const handleClear = useCallback(() => {
     setInputs(Array(HOLE_COUNT).fill(""));
+    setResult(null);
+    setFieldErrors({});
+    setGeneralErrors([]);
+  }, []);
+
+  // 应用配平建议：把建议质量写入对应空孔并清除旧结论，
+  // 最终结论仍由操作员点击「核验」产生
+  const handleApplySuggestion = useCallback((suggestion: BalanceSuggestion) => {
+    setInputs((prev) =>
+      prev.map((v, i) => (i === suggestion.hole ? String(suggestion.mass_g) : v)),
+    );
     setResult(null);
     setFieldErrors({});
     setGeneralErrors([]);
@@ -104,7 +115,7 @@ export default function App() {
           )}
         </section>
 
-        <ResultPanel result={result} />
+        <ResultPanel result={result} onApplySuggestion={handleApplySuggestion} />
       </main>
     </div>
   );

@@ -6,7 +6,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from .physics import HOLE_COUNT
+from .physics import HOLE_COUNT, MAX_MASS_G, MIN_MASS_G
 
 
 class Tube(BaseModel):
@@ -27,8 +27,8 @@ class Tube(BaseModel):
     @field_validator("mass_g")
     @classmethod
     def mass_in_range(cls, value: int) -> int:
-        if not 1 <= value <= 500:
-            raise ValueError("质量必须在 1 至 500 克之间")
+        if not MIN_MASS_G <= value <= MAX_MASS_G:
+            raise ValueError(f"质量必须在 {MIN_MASS_G} 至 {MAX_MASS_G} 克之间")
         return value
 
 
@@ -61,6 +61,15 @@ class ContributionOut(BaseModel):
     y_display: str
 
 
+class SuggestionOut(BaseModel):
+    """单支试管配平建议：向空孔 hole 加入 mass_g 克后的预测残余量。"""
+
+    hole: int
+    mass_g: int
+    predicted_residual_g: float
+    predicted_residual_display: str
+
+
 class VerifyResponse(BaseModel):
     balanced: bool
     verdict: str  # “放行” 或 “拒绝”
@@ -74,3 +83,5 @@ class VerifyResponse(BaseModel):
     x_display: str
     y_display: str
     contributions: List[ContributionOut]
+    # 仅“拒绝且存在一次加管即可放行的候选”时非空；放行或无可行建议时为 null
+    suggestion: Optional[SuggestionOut] = None

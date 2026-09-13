@@ -7,8 +7,15 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .models import ContributionOut, VerifyRequest, VerifyResponse
-from .physics import TOLERANCE_G, TubeLoad, compute_resultant, direction_display, round2_display
+from .models import ContributionOut, SuggestionOut, VerifyRequest, VerifyResponse
+from .physics import (
+    TOLERANCE_G,
+    TubeLoad,
+    compute_resultant,
+    direction_display,
+    round2_display,
+    suggest_balance,
+)
 
 app = FastAPI(title="十二孔离心转子偏载核验台", version="1.0.0")
 
@@ -32,6 +39,17 @@ def health() -> dict:
 def verify(request: VerifyRequest) -> VerifyResponse:
     loads = [TubeLoad(hole=t.hole, mass_g=t.mass_g) for t in request.tubes]
     result = compute_resultant(loads)
+    # 仅在拒绝时计算配平建议；无可行建议（无空孔或候选均超限）时为 None
+    suggestion = None
+    if not result.balanced:
+        found = suggest_balance(loads)
+        if found is not None:
+            suggestion = SuggestionOut(
+                hole=found.hole,
+                mass_g=found.mass_g,
+                predicted_residual_g=found.predicted_residual_g,
+                predicted_residual_display=round2_display(found.predicted_residual_g),
+            )
     return VerifyResponse(
         balanced=result.balanced,
         verdict="放行" if result.balanced else "拒绝",
@@ -57,4 +75,5 @@ def verify(request: VerifyRequest) -> VerifyResponse:
             )
             for c in result.contributions
         ],
+        suggestion=suggestion,
     )

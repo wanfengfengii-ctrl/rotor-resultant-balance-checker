@@ -29,7 +29,15 @@ HOLE_COUNT = 12
 ANGLE_STEP_DEG = 30.0
 TOLERANCE_G = 5.0
 
+MIN_MASS_G = 1
+MAX_MASS_G = 500
+
 _ZERO_EPS = 1e-9
+
+# 两个候选的预测残余量差异低于该值时视为并列，按质量较小、孔号较小决胜。
+# 数学上相等的残余在浮点上可能有 ~1e-14 的噪声（例如 cos(30°) 与 |cos(150°)|
+# 的最后一位不同），若按浮点精确比较会让噪声代替决胜规则。
+_TIE_EPS = 1e-9
 
 
 def round2_display(value: float) -> str:
@@ -122,3 +130,51 @@ def compute_resultant(loads: Iterable[TubeLoad]) -> RotorResult:
         balanced=residual <= TOLERANCE_G,
         contributions=tuple(contributions),
     )
+
+
+@dataclass(frozen=True)
+class BalanceSuggestion:
+    """单支试管配平建议：向空孔 hole 加入 mass_g 克后的预测残余量。"""
+
+    hole: int
+    mass_g: int
+    predicted_residual_g: float
+
+
+def _is_better_candidate(
+    predicted: float, mass_g: int, hole: int, best: BalanceSuggestion
+) -> bool:
+    """候选是否优于当前最优：残余量更小；并列时质量较小、孔号较小者优先。"""
+    if predicted < best.predicted_residual_g - _TIE_EPS:
+        return True
+    if predicted <= best.predicted_residual_g + _TIE_EPS:
+        return (mass_g, hole) < (best.mass_g, best.hole)
+    return False
+
+
+def suggest_balance(loads: Iterable[TubeLoad]) -> Optional[BalanceSuggestion]:
+    """为被拒绝的载荷寻找一次加管即可放行的配平建议。
+
+    遍历所有空孔与 1–500 克整数质量，复用 compute_resultant 计算预测残余量
+    （与正式判定同一条计算链路，保证应用建议后的核验结论与预测一致）。
+    以预测残余量最小为目标，按质量较小、孔号较小的顺序稳定决胜。
+    仅当最优预测值不超过放行阈值时返回建议；没有空孔或所有候选仍超限
+    时返回 None（无法通过单支试管配平）。
+    """
+    loads = list(loads)
+    occupied = {load.hole for load in loads}
+    best: Optional[BalanceSuggestion] = None
+    for hole in range(HOLE_COUNT):
+        if hole in occupied:
+            continue
+        for mass_g in range(MIN_MASS_G, MAX_MASS_G + 1):
+            predicted = compute_resultant(
+                [*loads, TubeLoad(hole=hole, mass_g=mass_g)]
+            ).residual_g
+            if best is None or _is_better_candidate(predicted, mass_g, hole, best):
+                best = BalanceSuggestion(
+                    hole=hole, mass_g=mass_g, predicted_residual_g=predicted
+                )
+    if best is None or best.predicted_residual_g > TOLERANCE_G:
+        return None
+    return best
