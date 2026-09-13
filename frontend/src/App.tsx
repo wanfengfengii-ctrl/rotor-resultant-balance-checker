@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { verifyRotor } from "./api";
 import { RotorView } from "./components/RotorView";
 import { ResultPanel } from "./components/ResultPanel";
@@ -12,9 +12,14 @@ export default function App() {
   const [fieldErrors, setFieldErrors] = useState<Record<number, string>>({});
   const [generalErrors, setGeneralErrors] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
+  // 载荷版本号：任何录入修改都同步递增（ref 不等待重渲染）。
+  // 核验响应返回时若版本已变，说明载荷在飞行途中被改过，
+  // 该次响应（结论 / 建议 / 422 错误）一律作废，以当前载荷重新核验为准。
+  const loadVersionRef = useRef(0);
 
   // 修改任何孔位：立即清除旧结论与旧错误，绝不沿用上一次放行结果
   const handleChange = useCallback((hole: number, value: string) => {
+    loadVersionRef.current += 1;
     setInputs((prev) => prev.map((v, i) => (i === hole ? value : v)));
     setResult(null);
     setFieldErrors({});
@@ -22,6 +27,7 @@ export default function App() {
   }, []);
 
   const handleClear = useCallback(() => {
+    loadVersionRef.current += 1;
     setInputs(Array(HOLE_COUNT).fill(""));
     setResult(null);
     setFieldErrors({});
@@ -29,11 +35,19 @@ export default function App() {
   }, []);
 
   // 应用配平建议：把建议质量写入对应空孔并清除旧结论，
-  // 最终结论仍由操作员点击「核验」产生
+  // 最终结论仍由操作员点击「核验」产生。
+  // 建议目标孔已被占用时旧建议失效：不得覆盖当前录入。
   const handleApplySuggestion = useCallback((suggestion: BalanceSuggestion) => {
-    setInputs((prev) =>
-      prev.map((v, i) => (i === suggestion.hole ? String(suggestion.mass_g) : v)),
-    );
+    loadVersionRef.current += 1;
+    setInputs((prev) => {
+      const current = prev[suggestion.hole].trim();
+      if (current !== "" && current !== "0") {
+        return prev; // 孔位已占用，拒绝覆盖
+      }
+      return prev.map((v, i) =>
+        i === suggestion.hole ? String(suggestion.mass_g) : v,
+      );
+    });
     setResult(null);
     setFieldErrors({});
     setGeneralErrors([]);
@@ -52,10 +66,18 @@ export default function App() {
     }
 
     setPending(true);
+    // 记录提交时的载荷版本；响应返回时版本不一致即视为过期响应
+    const submittedVersion = loadVersionRef.current;
     try {
       const response = await verifyRotor(tubes);
+      if (loadVersionRef.current !== submittedVersion) {
+        return; // 载荷已在等待期间修改：丢弃迟到的结论与建议
+      }
       setResult(response);
     } catch (error) {
+      if (loadVersionRef.current !== submittedVersion) {
+        return; // 同上：过期的校验错误不得挂到当前录入上
+      }
       if (error instanceof ApiValidationError) {
         const mapped = mapValidationErrors(error.details, holes);
         setFieldErrors(mapped.fieldErrors);

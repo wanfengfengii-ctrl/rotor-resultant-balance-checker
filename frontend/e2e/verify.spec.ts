@@ -134,3 +134,85 @@ test("单支试管无法配平时明确提示并保留拒绝明细", async ({ pa
   await expect(page.getByTestId("contribution-0")).toContainText("100");
   await expect(page.getByTestId("contribution-6")).toContainText("90");
 });
+
+/** 把 /api/verify 的响应延迟 ms 毫秒，模拟飞行途中的请求 */
+async function delayVerifyApi(
+  page: import("@playwright/test").Page,
+  ms: number,
+) {
+  await page.route("**/api/verify", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    await route.continue();
+  });
+}
+
+test("响应返回前修改孔位：迟到的拒绝结论被丢弃，保持清空等待重新核验", async ({
+  page,
+}) => {
+  await delayVerifyApi(page, 600);
+
+  await page.getByTestId("mass-input-0").fill("100");
+  await page.getByTestId("mass-input-6").fill("90");
+  await page.getByRole("button", { name: "核验" }).click();
+
+  // 响应返回前修改孔位：旧结论立即清除
+  await page.getByTestId("mass-input-6").fill("100");
+  await expect(page.getByTestId("verdict")).toHaveCount(0);
+
+  // 迟到的拒绝响应到达后也不得恢复修改前的明细
+  await page.waitForTimeout(1200);
+  await expect(page.getByTestId("verdict")).toHaveCount(0);
+  await expect(page.getByTestId("result-empty")).toBeVisible();
+
+  // 按当前载荷重新核验，得到唯一结论
+  await page.getByRole("button", { name: "核验" }).click();
+  await expect(page.getByTestId("verdict")).toHaveText("放行");
+  await expect(page.getByTestId("residual")).toHaveText("0.00");
+});
+
+test("等待拒绝响应时已占用建议目标孔：旧建议失效且不覆盖当前值", async ({
+  page,
+}) => {
+  await delayVerifyApi(page, 600);
+
+  await page.getByTestId("mass-input-0").fill("100");
+  await page.getByTestId("mass-input-6").fill("100");
+  await page.getByTestId("mass-input-3").fill("10");
+  await page.getByRole("button", { name: "核验" }).click();
+
+  // 响应返回前在建议目标孔（9 号）录入新质量
+  await page.getByTestId("mass-input-9").fill("55");
+
+  // 迟到的旧建议不得出现，已占孔位保持当前值
+  await page.waitForTimeout(1200);
+  await expect(page.getByTestId("suggestion")).toHaveCount(0);
+  await expect(page.getByTestId("verdict")).toHaveCount(0);
+  await expect(page.getByTestId("mass-input-9")).toHaveValue("55");
+
+  // 重新核验按当前载荷（含 9 号孔 55 g）判定
+  await page.getByRole("button", { name: "核验" }).click();
+  await expect(page.getByTestId("verdict")).toHaveText("拒绝");
+  await expect(page.getByTestId("contribution-9")).toContainText("55");
+});
+
+test("响应返回前修正越界质量：过期的校验错误被丢弃，新值保持无误", async ({
+  page,
+}) => {
+  await delayVerifyApi(page, 600);
+
+  await page.getByTestId("mass-input-0").fill("600");
+  await page.getByTestId("mass-input-6").fill("100");
+  await page.getByRole("button", { name: "核验" }).click();
+
+  // 422 响应返回前把该孔改为合法值
+  await page.getByTestId("mass-input-0").fill("100");
+
+  // 迟到的 422 不得把旧错误挂到当前合法录入上
+  await page.waitForTimeout(1200);
+  await expect(page.getByTestId("error-0")).toHaveCount(0);
+  await expect(page.getByTestId("mass-input-0")).toHaveValue("100");
+
+  // 当前载荷可直接核验通过
+  await page.getByRole("button", { name: "核验" }).click();
+  await expect(page.getByTestId("verdict")).toHaveText("放行");
+});
