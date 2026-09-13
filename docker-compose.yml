@@ -1,0 +1,43 @@
+name: centrifuge-verifier
+
+services:
+  backend:
+    build: ./backend
+    image: centrifuge-verifier-backend
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=2)"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  frontend:
+    build: ./frontend
+    image: centrifuge-verifier-frontend
+    ports:
+      # 宿主端口由 WEB_PORT 覆盖，默认 5173
+      - "${WEB_PORT:-5173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # 一次性验收服务：跑完 pytest + Vitest + Playwright 后退出
+  verify:
+    build:
+      context: .
+      dockerfile: verify/Dockerfile
+    image: centrifuge-verifier-verify
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    environment:
+      BACKEND_URL: http://backend:8000
+      FRONTEND_URL: http://frontend
