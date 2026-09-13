@@ -91,3 +91,41 @@ class TestLiveServer:
             json={"tubes": [{"hole": 5, "mass_g": 10}, {"hole": 5, "mass_g": 20}]},
         )
         assert resp.status_code == 422
+
+    def test_omitted_condition_is_null_over_http(self, http):
+        resp = http.post(
+            "/api/verify",
+            json={"tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 90}]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["condition"] is None
+
+    def test_centrifugal_force_over_http(self, http):
+        resp = http.post(
+            "/api/verify",
+            json={
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 90}],
+                "condition": {"speed_rpm": 3000, "radius_mm": 100},
+            },
+        )
+        assert resp.status_code == 200
+        condition = resp.json()["condition"]
+        assert condition["speed_rpm"] == 3000
+        assert condition["radius_mm"] == 100
+        # F = 0.01 · 0.1 · (2π·50)² ≈ 98.696 → 98.70 N
+        assert condition["centrifugal_force_n"] == pytest.approx(98.696044, abs=1e-6)
+        assert condition["centrifugal_force_display"] == "98.70"
+
+    def test_condition_validation_localized_over_http(self, http):
+        resp = http.post(
+            "/api/verify",
+            json={
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 100}],
+                "condition": {"speed_rpm": 99, "radius_mm": 100},
+            },
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(
+            e["loc"][-2:] == ["condition", "speed_rpm"] for e in detail
+        )

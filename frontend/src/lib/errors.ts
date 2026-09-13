@@ -1,5 +1,7 @@
 /** API 校验错误（HTTP 422）的解析与逐字段映射。 */
 
+import type { ConditionField } from "./condition";
+
 export interface ApiErrorDetail {
   loc: Array<string | number>;
   msg: string;
@@ -19,6 +21,8 @@ export class ApiValidationError extends Error {
 export interface MappedErrors {
   /** 键为孔位编号 */
   fieldErrors: Record<number, string>;
+  /** 键为工况字段（转速 / 有效半径） */
+  conditionErrors: Partial<Record<ConditionField, string>>;
   generalErrors: string[];
 }
 
@@ -39,26 +43,45 @@ export function translateMessage(msg: string): string {
   return msg;
 }
 
+const CONDITION_FIELDS: ReadonlySet<string> = new Set(["speed_rpm", "radius_mm"]);
+
 /**
- * 把 422 detail 列表映射回孔位。
+ * 把 422 detail 列表映射回输入位置。
  * FastAPI 的 loc 形如 ["body", "tubes", <下标>, <字段>]；
- * 无法定位到具体孔位的错误（如“孔位重复”“至少需要两支试管”）归入 generalErrors。
+ * 工况错误形如 ["body", "condition", <字段>]。
+ * 无法定位到具体孔位或工况字段的错误（如“孔位重复”“至少需要两支试管”）
+ * 归入 generalErrors。
  */
 export function mapValidationErrors(
   details: ApiErrorDetail[],
   submittedHoles: number[],
 ): MappedErrors {
   const fieldErrors: Record<number, string> = {};
+  const conditionErrors: Partial<Record<ConditionField, string>> = {};
   const generalErrors: string[] = [];
 
   for (const detail of details) {
     const loc = Array.isArray(detail.loc) ? detail.loc : [];
-    const tubesAt = loc.indexOf("tubes");
-    const index = tubesAt >= 0 ? loc[tubesAt + 1] : undefined;
-    const hole = typeof index === "number" ? submittedHoles[index] : undefined;
     const message = translateMessage(detail.msg);
-    if (hole !== undefined) {
-      fieldErrors[hole] = message;
+
+    const tubesAt = loc.indexOf("tubes");
+    const conditionAt = loc.indexOf("condition");
+
+    if (tubesAt >= 0) {
+      const index = loc[tubesAt + 1];
+      const hole = typeof index === "number" ? submittedHoles[index] : undefined;
+      if (hole !== undefined) {
+        fieldErrors[hole] = message;
+      } else {
+        generalErrors.push(message);
+      }
+    } else if (conditionAt >= 0) {
+      const field = loc[conditionAt + 1];
+      if (typeof field === "string" && CONDITION_FIELDS.has(field)) {
+        conditionErrors[field as ConditionField] = message;
+      } else {
+        generalErrors.push(message);
+      }
     } else {
       generalErrors.push(message);
     }
@@ -67,5 +90,5 @@ export function mapValidationErrors(
   if (details.length === 0) {
     generalErrors.push("请求未通过服务端校验");
   }
-  return { fieldErrors, generalErrors };
+  return { fieldErrors, conditionErrors, generalErrors };
 }

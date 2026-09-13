@@ -1,5 +1,8 @@
 """API 层测试：校验规则（422 逐字段错误）与响应内容。"""
 
+import math
+
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -211,3 +214,220 @@ class TestValidation:
         assert detail[0]["loc"][:2] == ["body", "tubes"]
         assert detail[0]["loc"][2] == 1  # 第二支试管
         assert detail[0]["loc"][3] == "mass_g"
+
+
+class TestOperatingCondition:
+    def test_omitted_condition_stays_null_and_keeps_existing_result(self):
+        resp = post(
+            {"tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 90}]}
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["condition"] is None
+        # 既有字段与调用结果不受影响
+        assert body["balanced"] is False
+        assert body["residual_display"] == "10.00"
+        assert body["direction_display"] == "0.00"
+
+    def test_condition_returns_force_next_to_verdict(self):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 90}],
+                "condition": {"speed_rpm": 3000, "radius_mm": 100},
+            }
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        condition = body["condition"]
+        assert condition is not None
+        assert condition["speed_rpm"] == 3000
+        assert condition["radius_mm"] == 100
+        # F = 0.01 · 0.1 · (2π·50)² ≈ 98.696 → 两位小数 98.70
+        assert condition["centrifugal_force_n"] == pytest.approx(98.696044, abs=1e-6)
+        assert condition["centrifugal_force_display"] == "98.70"
+        # 放行结论、阈值、方向、明细、建议均不受工况影响
+        assert body["balanced"] is False
+        assert body["threshold_g"] == 5.0
+        assert body["direction_display"] == "0.00"
+        assert len(body["contributions"]) == 2
+        assert body["suggestion"] is None
+
+    def test_force_computed_from_unrounded_residual(self):
+        # 整数载荷 100@0 + 96@6 + 1@3：残余量 √17 ≈ 4.1231（展示 4.12），
+        # 离心力必须按未舍入残余量而非展示值计算
+        resp = post(
+            {
+                "tubes": [
+                    {"hole": 0, "mass_g": 100},
+                    {"hole": 6, "mass_g": 96},
+                    {"hole": 3, "mass_g": 1},
+                ],
+                "condition": {"speed_rpm": 1000, "radius_mm": 500},
+            }
+        )
+        body = resp.json()
+        residual_g = body["residual_g"]
+        assert residual_g == pytest.approx(math.sqrt(17), abs=1e-9)
+        assert body["residual_display"] == "4.12"
+        expected = (residual_g / 1000) * 0.5 * (2 * math.pi * 1000 / 60) ** 2
+        assert body["condition"]["centrifugal_force_n"] == pytest.approx(expected)
+        rounded_expected = (4.12 / 1000) * 0.5 * (2 * math.pi * 1000 / 60) ** 2
+        assert body["condition"]["centrifugal_force_n"] != pytest.approx(
+            rounded_expected, abs=1e-6
+        )
+
+    def test_condition_does_not_change_balance_chain_for_balanced_load(self):
+        without = post({"tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 100}]})
+        with_condition = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 100}],
+                "condition": {"speed_rpm": 30000, "radius_mm": 500},
+            }
+        )
+        a, b = without.json(), with_condition.json()
+        assert a["balanced"] == b["balanced"] is True
+        assert a["residual_g"] == b["residual_g"] == 0.0
+        # 残余为零：高速工况下离心力仍为零
+        assert b["condition"]["centrifugal_force_display"] == "0.00"
+
+    @pytest.mark.parametrize(
+        "speed,radius",
+        [
+            (100, 10),       # 双侧下边界
+            (30000, 500),    # 双侧上边界
+            (100, 500),
+            (30000, 10),
+        ],
+    )
+    def test_boundary_values_accepted(self, speed, radius):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 90}],
+                "condition": {"speed_rpm": speed, "radius_mm": radius},
+            }
+        )
+        assert resp.status_code == 200
+        condition = resp.json()["condition"]
+        assert condition["speed_rpm"] == speed
+        assert condition["radius_mm"] == radius
+
+    @pytest.mark.parametrize("speed", [99, 30001, 0, -100])
+    def test_speed_out_of_range_localized_to_speed_field(self, speed):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 100}],
+                "condition": {"speed_rpm": speed, "radius_mm": 100},
+            }
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(
+            e["loc"][-2:] == ["condition", "speed_rpm"] for e in detail
+        ), detail
+        assert all(e["loc"][-1] != "radius_mm" for e in detail)
+
+    @pytest.mark.parametrize("radius", [9, 501, 0, -10])
+    def test_radius_out_of_range_localized_to_radius_field(self, radius):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 100}],
+                "condition": {"speed_rpm": 1000, "radius_mm": radius},
+            }
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(
+            e["loc"][-2:] == ["condition", "radius_mm"] for e in detail
+        ), detail
+        assert all(e["loc"][-1] != "speed_rpm" for e in detail)
+
+    @pytest.mark.parametrize("bad_speed", [1000.5, "1000", True])
+    def test_non_integer_speed_localized_to_speed_field(self, bad_speed):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 100}],
+                "condition": {"speed_rpm": bad_speed, "radius_mm": 100},
+            }
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(e["loc"][-1] == "speed_rpm" for e in detail)
+
+    @pytest.mark.parametrize("bad_radius", [100.5, "100", True])
+    def test_non_integer_radius_localized_to_radius_field(self, bad_radius):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 100}],
+                "condition": {"speed_rpm": 1000, "radius_mm": bad_radius},
+            }
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(e["loc"][-1] == "radius_mm" for e in detail)
+
+    def test_missing_speed_with_radius_localized_to_speed(self):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 100}],
+                "condition": {"radius_mm": 100},
+            }
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(e["loc"][-2:] == ["condition", "speed_rpm"] for e in detail)
+
+    def test_missing_radius_with_speed_localized_to_radius(self):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 100}],
+                "condition": {"speed_rpm": 1000},
+            }
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(e["loc"][-2:] == ["condition", "radius_mm"] for e in detail)
+
+    def test_condition_with_wrong_type_is_rejected(self):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 100}],
+                "condition": [1000, 100],
+            }
+        )
+        assert resp.status_code == 422
+
+    def test_condition_kept_through_rejection_and_suggestion_flow(self):
+        # 拒绝 + 配平建议场景：工况只附加离心力，建议仍由质量矢量链路决定
+        resp = post(
+            {
+                "tubes": [
+                    {"hole": 0, "mass_g": 100},
+                    {"hole": 6, "mass_g": 100},
+                    {"hole": 3, "mass_g": 10},
+                ],
+                "condition": {"speed_rpm": 2000, "radius_mm": 150},
+            }
+        )
+        body = resp.json()
+        assert body["balanced"] is False
+        assert body["suggestion"] is not None
+        assert (body["suggestion"]["hole"], body["suggestion"]["mass_g"]) == (9, 10)
+        assert body["condition"]["speed_rpm"] == 2000
+        assert body["condition"]["radius_mm"] == 150
+
+        # 应用建议后再次核验（仍带同一工况）：放行且离心力归零
+        applied = post(
+            {
+                "tubes": [
+                    {"hole": 0, "mass_g": 100},
+                    {"hole": 6, "mass_g": 100},
+                    {"hole": 3, "mass_g": 10},
+                    {"hole": 9, "mass_g": 10},
+                ],
+                "condition": {"speed_rpm": 2000, "radius_mm": 150},
+            }
+        )
+        applied_body = applied.json()
+        assert applied_body["balanced"] is True
+        assert applied_body["residual_g"] == 0.0
+        assert applied_body["condition"]["centrifugal_force_display"] == "0.00"

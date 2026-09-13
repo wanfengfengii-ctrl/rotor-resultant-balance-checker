@@ -9,7 +9,7 @@ export function ResultPanel({ result, onApplySuggestion }: ResultPanelProps) {
   if (!result) {
     return (
       <section className="result-panel empty" data-testid="result-empty">
-        <p>录入各孔质量后点击「核验」。结论仅此一处显示，修改任何孔位后自动清除。</p>
+        <p>录入各孔质量（可选填转速与有效半径）后点击「核验」。结论仅此一处显示，修改任何孔位或工况后自动清除。</p>
       </section>
     );
   }
@@ -22,6 +22,25 @@ export function ResultPanel({ result, onApplySuggestion }: ResultPanelProps) {
       >
         {result.verdict}
       </div>
+
+      {result.condition && (
+        <div className="condition-result" data-testid="condition-result">
+          <span className="condition-item" data-testid="condition-speed">
+            转速 <strong>{result.condition.speed_rpm}</strong> 转/分钟
+          </span>
+          <span className="condition-item" data-testid="condition-radius">
+            有效半径 <strong>{result.condition.radius_mm}</strong> mm
+          </span>
+          <span className="condition-item" data-testid="centrifugal-force">
+            离心力{" "}
+            <strong>{result.condition.centrifugal_force_display}</strong> N
+          </span>
+          <span className="condition-note">
+            离心力仅供评估工况严重程度，放行仍以残余量 {result.threshold_g.toFixed(2)} g
+            阈值为准
+          </span>
+        </div>
+      )}
 
       {!result.balanced &&
         (result.suggestion ? (

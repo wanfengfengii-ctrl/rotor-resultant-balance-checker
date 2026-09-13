@@ -6,7 +6,15 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from .physics import HOLE_COUNT, MAX_MASS_G, MIN_MASS_G
+from .physics import (
+    HOLE_COUNT,
+    MAX_MASS_G,
+    MAX_RADIUS_MM,
+    MAX_SPEED_RPM,
+    MIN_MASS_G,
+    MIN_RADIUS_MM,
+    MIN_SPEED_RPM,
+)
 
 
 class Tube(BaseModel):
@@ -32,10 +40,42 @@ class Tube(BaseModel):
         return value
 
 
+class OperatingConditionIn(BaseModel):
+    """可选工况：转速与有效半径必须同时给出或同时省略。
+
+    strict 模式拒绝浮点 / 字符串等非整数输入，越界由逐字段校验器拒绝。
+    """
+
+    model_config = ConfigDict(strict=True)
+
+    speed_rpm: int
+    radius_mm: int
+
+    @field_validator("speed_rpm")
+    @classmethod
+    def speed_in_range(cls, value: int) -> int:
+        if not MIN_SPEED_RPM <= value <= MAX_SPEED_RPM:
+            raise ValueError(
+                f"转速必须在 {MIN_SPEED_RPM} 至 {MAX_SPEED_RPM} 转/分钟之间"
+            )
+        return value
+
+    @field_validator("radius_mm")
+    @classmethod
+    def radius_in_range(cls, value: int) -> int:
+        if not MIN_RADIUS_MM <= value <= MAX_RADIUS_MM:
+            raise ValueError(
+                f"有效半径必须在 {MIN_RADIUS_MM} 至 {MAX_RADIUS_MM} 毫米之间"
+            )
+        return value
+
+
 class VerifyRequest(BaseModel):
     model_config = ConfigDict(strict=True)
 
     tubes: List[Tube]
+    # 两项工况参数成对可选：省略整个对象或两项都不填时为 None（按原方式核验）
+    condition: Optional[OperatingConditionIn] = None
 
     @field_validator("tubes")
     @classmethod
@@ -70,6 +110,15 @@ class SuggestionOut(BaseModel):
     predicted_residual_display: str
 
 
+class OperatingConditionOut(BaseModel):
+    """本次核验使用的工况参数与由未舍入残余量算出的离心力。"""
+
+    speed_rpm: int
+    radius_mm: int
+    centrifugal_force_n: float
+    centrifugal_force_display: str
+
+
 class VerifyResponse(BaseModel):
     balanced: bool
     verdict: str  # “放行” 或 “拒绝”
@@ -85,3 +134,5 @@ class VerifyResponse(BaseModel):
     contributions: List[ContributionOut]
     # 仅“拒绝且存在一次加管即可放行的候选”时非空；放行或无可行建议时为 null
     suggestion: Optional[SuggestionOut] = None
+    # 仅在请求带完整工况（转速 + 有效半径）时非空；省略工况时为 null
+    condition: Optional[OperatingConditionOut] = None

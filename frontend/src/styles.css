@@ -192,6 +192,65 @@ body {
 
 /* ---------- 控件与错误 ---------- */
 
+.condition {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 18px;
+  justify-content: center;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+
+.condition-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.condition-field label {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.condition-field input {
+  width: 132px;
+  padding: 6px 8px;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+}
+
+.condition-field input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.condition-field.has-error input {
+  border-color: var(--fail);
+}
+
+.condition-field .field-error {
+  position: static;
+  max-width: 220px;
+  width: auto;
+  white-space: normal;
+}
+
+.condition-hint {
+  flex-basis: 100%;
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
 .controls {
   display: flex;
   align-items: center;
@@ -270,6 +329,36 @@ button:disabled {
 .verdict.fail {
   color: #2b0b09;
   background: var(--fail);
+}
+
+/* ---------- 工况与离心力 ---------- */
+
+.condition-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  border: 1px solid var(--panel-border);
+  background: rgba(77, 163, 255, 0.06);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 0.9rem;
+}
+
+.condition-item {
+  font-variant-numeric: tabular-nums;
+}
+
+.condition-item strong {
+  color: var(--accent);
+}
+
+.condition-note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
 }
 
 /* ---------- 配平建议 ---------- */

@@ -39,6 +39,30 @@ describe("mapValidationErrors", () => {
     const { generalErrors } = mapValidationErrors([], []);
     expect(generalErrors).toHaveLength(1);
   });
+
+  it("把工况错误映射到对应工况字段而非孔位", () => {
+    const details = [
+      detail(["body", "condition", "speed_rpm"], "转速必须在 100 至 30000 转/分钟之间"),
+      detail(["body", "condition", "radius_mm"], "有效半径必须为整数"),
+    ];
+    const { fieldErrors, conditionErrors, generalErrors } = mapValidationErrors(
+      details,
+      [0, 6],
+    );
+    expect(fieldErrors).toEqual({});
+    expect(conditionErrors.speed_rpm).toContain("30000");
+    expect(conditionErrors.radius_mm).toContain("整数");
+    expect(generalErrors).toEqual([]);
+  });
+
+  it("只填一项时的缺失字段错误也能定位到对应工况输入", () => {
+    const details = [
+      detail(["body", "condition", "speed_rpm"], "Field required"),
+    ];
+    const { conditionErrors, generalErrors } = mapValidationErrors(details, [0, 6]);
+    expect(conditionErrors.speed_rpm).toBe("缺少必填字段");
+    expect(generalErrors).toEqual([]);
+  });
 });
 
 describe("translateMessage", () => {

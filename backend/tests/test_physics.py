@@ -7,6 +7,7 @@ import pytest
 from app.physics import (
     TOLERANCE_G,
     TubeLoad,
+    centrifugal_force_n,
     compute_resultant,
     direction_display,
     hole_angle_deg,
@@ -188,6 +189,50 @@ class TestSuggestBalance:
         full = loads(*[(k, 100) for k in range(11)], (11, 120))
         assert compute_resultant(full).balanced is False
         assert suggest_balance(full) is None
+
+
+class TestCentrifugalForce:
+    def test_formula_typical_conversion(self):
+        # R=10 g、r=100 mm、n=3000 rpm：
+        # F = 0.01 · 0.1 · (2π·50)² ≈ 98.696 N
+        force = centrifugal_force_n(10.0, 3000, 100)
+        expected = 0.01 * 0.1 * (2 * math.pi * 3000 / 60) ** 2
+        assert force == pytest.approx(expected)
+        assert force == pytest.approx(98.696044, abs=1e-6)
+        assert round2_display(force) == "98.70"
+
+    def test_scales_quadratically_with_speed(self):
+        # 转速翻倍、半径不变：离心力变为 4 倍
+        low = centrifugal_force_n(10.0, 1000, 100)
+        high = centrifugal_force_n(10.0, 2000, 100)
+        assert high == pytest.approx(4 * low)
+
+    def test_scales_linearly_with_residual_and_radius(self):
+        base = centrifugal_force_n(10.0, 3000, 100)
+        assert centrifugal_force_n(20.0, 3000, 100) == pytest.approx(2 * base)
+        assert centrifugal_force_n(10.0, 3000, 250) == pytest.approx(2.5 * base)
+
+    def test_uses_unrounded_residual(self):
+        # 残余量 4.996…（展示为 5.00）：离心力必须基于未舍入值而非 5.00
+        residual = compute_resultant(
+            loads((0, 104.996), (6, 100))
+        ).residual_g
+        assert round2_display(residual) == "5.00"
+        force = centrifugal_force_n(residual, 3000, 100)
+        assert force == pytest.approx(
+            (residual / 1000) * 0.1 * (2 * math.pi * 50) ** 2
+        )
+        assert force != pytest.approx(centrifugal_force_n(5.0, 3000, 100))
+
+    def test_zero_residual_gives_zero_force(self):
+        assert centrifugal_force_n(0.0, 30000, 500) == 0.0
+
+    def test_high_speed_boundary_value(self):
+        # 边界：n=30000 rpm、r=500 mm、R=1 g
+        force = centrifugal_force_n(1.0, 30000, 500)
+        expected = 0.001 * 0.5 * (2 * math.pi * 30000 / 60) ** 2
+        assert force == pytest.approx(expected)
+        assert force == pytest.approx(4934.8022005, abs=1e-3)
 
 
 class TestRound2Display:

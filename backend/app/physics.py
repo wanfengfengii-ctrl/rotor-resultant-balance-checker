@@ -32,6 +32,12 @@ TOLERANCE_G = 5.0
 MIN_MASS_G = 1
 MAX_MASS_G = 500
 
+# 可选工况参数范围
+MIN_SPEED_RPM = 100
+MAX_SPEED_RPM = 30000
+MIN_RADIUS_MM = 10
+MAX_RADIUS_MM = 500
+
 _ZERO_EPS = 1e-9
 
 # 两个候选的预测残余量差异低于该值时视为并列，按质量较小、孔号较小决胜。
@@ -59,6 +65,22 @@ def direction_display(direction_deg: float) -> str:
     if quantized == 0:
         quantized = Decimal("0.00")
     return format(quantized, "f")
+
+
+def centrifugal_force_n(
+    residual_g: float, speed_rpm: int, radius_mm: int
+) -> float:
+    """残余不平衡量在给定工况下产生的离心力（牛顿）。
+
+        F = (R/1000) · (r/1000) · (2πn/60)²
+
+    其中 R 为未舍入残余量（克），r 为转子有效半径（毫米），n 为转速（转/分）。
+    离心力仅供操作员评估工况严重程度，不参与放行判定。
+    """
+    residual_kg = residual_g / 1000.0
+    radius_m = radius_mm / 1000.0
+    omega = 2.0 * math.pi * speed_rpm / 60.0
+    return residual_kg * radius_m * omega * omega
 
 
 def hole_angle_deg(hole: int) -> float:

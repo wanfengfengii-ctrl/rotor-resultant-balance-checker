@@ -216,3 +216,171 @@ test("响应返回前修正越界质量：过期的校验错误被丢弃，新�
   await page.getByRole("button", { name: "核验" }).click();
   await expect(page.getByTestId("verdict")).toHaveText("放行");
 });
+
+test.describe("可选工况与离心力", () => {
+  test("不填工况时结果面板无工况区，核验行为与原来一致", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("verdict")).toHaveText("拒绝");
+    await expect(page.getByTestId("condition-result")).toHaveCount(0);
+  });
+
+  test("转速与有效半径完整时：工况参数与离心力显示在结论旁", async ({
+    page,
+  }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByTestId("speed-input").fill("3000");
+    await page.getByTestId("radius-input").fill("100");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    // 放行阈值、方向、明细仍由质量矢量链路决定
+    await expect(page.getByTestId("verdict")).toHaveText("拒绝");
+    await expect(page.getByTestId("residual")).toHaveText("10.00");
+    await expect(page.getByTestId("direction")).toHaveText("0.00°");
+
+    // F = (10/1000)(100/1000)(2π·3000/60)² ≈ 98.696 → 98.70 N
+    await expect(page.getByTestId("condition-speed")).toContainText("3000");
+    await expect(page.getByTestId("condition-radius")).toContainText("100");
+    await expect(page.getByTestId("centrifugal-force")).toHaveText(
+      /离心力\s*98\.70\s*N/,
+    );
+  });
+
+  test("放行时残余为零，离心力显示 0.00 N", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("100");
+    await page.getByTestId("speed-input").fill("30000");
+    await page.getByTestId("radius-input").fill("500");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("verdict")).toHaveText("放行");
+    await expect(page.getByTestId("centrifugal-force")).toContainText("0.00 N");
+  });
+
+  test("只填转速：错误定位到空着的有效半径输入，不展示旧结论", async ({
+    page,
+  }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByTestId("speed-input").fill("3000");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("radius-error")).toBeVisible();
+    await expect(page.getByTestId("radius-error")).toContainText("同时填写");
+    await expect(page.getByTestId("speed-error")).toHaveCount(0);
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+  });
+
+  test("只填有效半径：错误定位到空着的转速输入", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByTestId("radius-input").fill("100");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("speed-error")).toBeVisible();
+    await expect(page.getByTestId("radius-error")).toHaveCount(0);
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+  });
+
+  test("转速越界：错误定位到转速输入，不展示旧结论与旧离心力", async ({
+    page,
+  }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    // 先取得一次带工况的结论
+    await page.getByTestId("speed-input").fill("3000");
+    await page.getByTestId("radius-input").fill("100");
+    await page.getByRole("button", { name: "核验" }).click();
+    await expect(page.getByTestId("centrifugal-force")).toBeVisible();
+
+    // 改为越界转速后重新核验：旧结论 / 旧离心力不得沿用
+    await page.getByTestId("speed-input").fill("99");
+    await page.getByRole("button", { name: "核验" }).click();
+    await expect(page.getByTestId("speed-error")).toContainText("100");
+    await expect(page.getByTestId("radius-error")).toHaveCount(0);
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+    await expect(page.getByTestId("centrifugal-force")).toHaveCount(0);
+  });
+
+  test("半径非整数：错误定位到半径输入", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByTestId("speed-input").fill("3000");
+    await page.getByTestId("radius-input").fill("abc");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("radius-error")).toContainText("整数");
+    await expect(page.getByTestId("speed-error")).toHaveCount(0);
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+  });
+
+  test("边界工况（100 转/分钟、10 毫米；30000 转/分钟、500 毫米）可用", async ({
+    page,
+  }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+
+    await page.getByTestId("speed-input").fill("100");
+    await page.getByTestId("radius-input").fill("10");
+    await page.getByRole("button", { name: "核验" }).click();
+    await expect(page.getByTestId("centrifugal-force")).toContainText("0.01 N");
+
+    await page.getByTestId("speed-input").fill("30000");
+    await page.getByTestId("radius-input").fill("500");
+    await page.getByRole("button", { name: "核验" }).click();
+    // F = 0.01 · 0.5 · (2π·500)² ≈ 49348.02 N
+    await expect(page.getByTestId("centrifugal-force")).toContainText("49348.02 N");
+  });
+
+  test("应用配平建议后工况参数保留，再次核验离心力归零", async ({
+    page,
+  }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("100");
+    await page.getByTestId("mass-input-3").fill("10");
+    await page.getByTestId("speed-input").fill("3000");
+    await page.getByTestId("radius-input").fill("100");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("verdict")).toHaveText("拒绝");
+    await expect(page.getByTestId("centrifugal-force")).toContainText("98.70 N");
+
+    // 应用建议：工况输入原样保留
+    await page.getByTestId("apply-suggestion").click();
+    await expect(page.getByTestId("speed-input")).toHaveValue("3000");
+    await expect(page.getByTestId("radius-input")).toHaveValue("100");
+
+    // 再次核验：放行，残余与离心力均为 0.00
+    await page.getByRole("button", { name: "核验" }).click();
+    await expect(page.getByTestId("verdict")).toHaveText("放行");
+    await expect(page.getByTestId("residual")).toHaveText("0.00");
+    await expect(page.getByTestId("centrifugal-force")).toContainText("0.00 N");
+  });
+
+  test("修改工况参数立即清除旧结论", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByTestId("speed-input").fill("3000");
+    await page.getByTestId("radius-input").fill("100");
+    await page.getByRole("button", { name: "核验" }).click();
+    await expect(page.getByTestId("verdict")).toHaveText("拒绝");
+
+    await page.getByTestId("speed-input").fill("2000");
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+    await expect(page.getByTestId("condition-result")).toHaveCount(0);
+    await expect(page.getByTestId("result-empty")).toBeVisible();
+  });
+
+  test("清空按钮同时复位工况输入", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("speed-input").fill("3000");
+    await page.getByTestId("radius-input").fill("100");
+    await page.getByRole("button", { name: "清空" }).click();
+
+    await expect(page.getByTestId("speed-input")).toHaveValue("");
+    await expect(page.getByTestId("radius-input")).toHaveValue("");
+  });
+});

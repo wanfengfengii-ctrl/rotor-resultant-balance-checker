@@ -2,17 +2,28 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { verifyRotor } from "./api";
 import { RotorView } from "./components/RotorView";
 import { ResultPanel } from "./components/ResultPanel";
+import { ConditionInputs } from "./components/ConditionInputs";
 import { ApiValidationError, mapValidationErrors } from "./lib/errors";
+import {
+  buildCondition,
+  type ConditionField,
+} from "./lib/condition";
 import { buildTubes, countFilled, HOLE_COUNT } from "./lib/rotor";
 import type { BalanceSuggestion, VerifyResponse } from "./types";
 
 export default function App() {
   const [inputs, setInputs] = useState<string[]>(() => Array(HOLE_COUNT).fill(""));
+  // 可选工况：转速与有效半径；应用建议与重新核验期间均保留，清空时才复位
+  const [speedInput, setSpeedInput] = useState("");
+  const [radiusInput, setRadiusInput] = useState("");
   const [result, setResult] = useState<VerifyResponse | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<number, string>>({});
+  const [conditionErrors, setConditionErrors] = useState<
+    Partial<Record<ConditionField, string>>
+  >({});
   const [generalErrors, setGeneralErrors] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
-  // 载荷版本号：任何录入修改都同步递增（ref 不等待重渲染）。
+  // 载荷版本号：任何录入修改（孔位或工况）都同步递增（ref 不等待重渲染）。
   // 核验响应返回时若版本已变，说明载荷在飞行途中被改过，
   // 该次响应（结论 / 建议 / 422 错误）一律作废，以当前载荷重新核验为准。
   const loadVersionRef = useRef(0);
@@ -23,20 +34,42 @@ export default function App() {
     setInputs((prev) => prev.map((v, i) => (i === hole ? value : v)));
     setResult(null);
     setFieldErrors({});
+    setConditionErrors({});
     setGeneralErrors([]);
   }, []);
+
+  // 修改工况参数与修改孔位同效：旧结论与旧离心力立即清除
+  const handleConditionChange = useCallback(
+    (field: ConditionField, value: string) => {
+      loadVersionRef.current += 1;
+      if (field === "speed_rpm") {
+        setSpeedInput(value);
+      } else {
+        setRadiusInput(value);
+      }
+      setResult(null);
+      setFieldErrors({});
+      setConditionErrors({});
+      setGeneralErrors([]);
+    },
+    [],
+  );
 
   const handleClear = useCallback(() => {
     loadVersionRef.current += 1;
     setInputs(Array(HOLE_COUNT).fill(""));
+    setSpeedInput("");
+    setRadiusInput("");
     setResult(null);
     setFieldErrors({});
+    setConditionErrors({});
     setGeneralErrors([]);
   }, []);
 
   // 应用配平建议：把建议质量写入对应空孔并清除旧结论，
   // 最终结论仍由操作员点击「核验」产生。
   // 建议目标孔已被占用时旧建议失效：不得覆盖当前录入。
+  // 工况参数（转速 / 有效半径）原样保留，供再次核验复用。
   const handleApplySuggestion = useCallback((suggestion: BalanceSuggestion) => {
     loadVersionRef.current += 1;
     setInputs((prev) => {
@@ -50,6 +83,7 @@ export default function App() {
     });
     setResult(null);
     setFieldErrors({});
+    setConditionErrors({});
     setGeneralErrors([]);
   }, []);
 
@@ -57,11 +91,20 @@ export default function App() {
     // 每次提交都先清空旧结论：失败时只显示错误
     setResult(null);
     setFieldErrors({});
+    setConditionErrors({});
     setGeneralErrors([]);
 
     const { tubes, holes, fieldErrors: localErrors } = buildTubes(inputs);
-    if (Object.keys(localErrors).length > 0) {
+    const { condition, errors: localConditionErrors } = buildCondition(
+      speedInput,
+      radiusInput,
+    );
+    if (
+      Object.keys(localErrors).length > 0 ||
+      Object.keys(localConditionErrors).length > 0
+    ) {
       setFieldErrors(localErrors);
+      setConditionErrors(localConditionErrors);
       return;
     }
 
@@ -69,7 +112,7 @@ export default function App() {
     // 记录提交时的载荷版本；响应返回时版本不一致即视为过期响应
     const submittedVersion = loadVersionRef.current;
     try {
-      const response = await verifyRotor(tubes);
+      const response = await verifyRotor(tubes, condition);
       if (loadVersionRef.current !== submittedVersion) {
         return; // 载荷已在等待期间修改：丢弃迟到的结论与建议
       }
@@ -81,6 +124,7 @@ export default function App() {
       if (error instanceof ApiValidationError) {
         const mapped = mapValidationErrors(error.details, holes);
         setFieldErrors(mapped.fieldErrors);
+        setConditionErrors(mapped.conditionErrors);
         setGeneralErrors(mapped.generalErrors);
       } else {
         setGeneralErrors([
@@ -90,7 +134,7 @@ export default function App() {
     } finally {
       setPending(false);
     }
-  }, [inputs]);
+  }, [inputs, speedInput, radiusInput]);
 
   const filled = useMemo(() => countFilled(inputs), [inputs]);
 
@@ -110,6 +154,12 @@ export default function App() {
             fieldErrors={fieldErrors}
             result={result}
             onChange={handleChange}
+          />
+          <ConditionInputs
+            speed={speedInput}
+            radius={radiusInput}
+            errors={conditionErrors}
+            onChange={handleConditionChange}
           />
           <div className="controls">
             <button

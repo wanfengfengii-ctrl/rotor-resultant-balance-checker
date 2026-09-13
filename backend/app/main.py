@@ -7,10 +7,17 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .models import ContributionOut, SuggestionOut, VerifyRequest, VerifyResponse
+from .models import (
+    ContributionOut,
+    OperatingConditionOut,
+    SuggestionOut,
+    VerifyRequest,
+    VerifyResponse,
+)
 from .physics import (
     TOLERANCE_G,
     TubeLoad,
+    centrifugal_force_n,
     compute_resultant,
     direction_display,
     round2_display,
@@ -50,6 +57,20 @@ def verify(request: VerifyRequest) -> VerifyResponse:
                 predicted_residual_g=found.predicted_residual_g,
                 predicted_residual_display=round2_display(found.predicted_residual_g),
             )
+    # 工况参数成对给出时，复用未舍入残余量计算离心力；省略工况时为 None
+    condition_out = None
+    if request.condition is not None:
+        force_n = centrifugal_force_n(
+            result.residual_g,
+            request.condition.speed_rpm,
+            request.condition.radius_mm,
+        )
+        condition_out = OperatingConditionOut(
+            speed_rpm=request.condition.speed_rpm,
+            radius_mm=request.condition.radius_mm,
+            centrifugal_force_n=force_n,
+            centrifugal_force_display=round2_display(force_n),
+        )
     return VerifyResponse(
         balanced=result.balanced,
         verdict="放行" if result.balanced else "拒绝",
@@ -76,4 +97,5 @@ def verify(request: VerifyRequest) -> VerifyResponse:
             for c in result.contributions
         ],
         suggestion=suggestion,
+        condition=condition_out,
     )
