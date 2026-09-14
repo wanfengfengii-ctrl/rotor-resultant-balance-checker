@@ -76,4 +76,14 @@ describe("countFilled", () => {
     inputs[3] = "50";
     expect(countFilled(inputs)).toBe(2);
   });
+
+  it("负数、超过 500 克与超大整数不计入试管数", () => {
+    const inputs = empty();
+    inputs[0] = "-5"; // 负数，不计入
+    inputs[1] = "501"; // 超过 500 克，不计入
+    inputs[2] = "99999999999999999999"; // 超大整数，不计入
+    inputs[3] = "500"; // 边界合法值
+    inputs[4] = "1"; // 边界合法值
+    expect(countFilled(inputs)).toBe(2);
+  });
 });

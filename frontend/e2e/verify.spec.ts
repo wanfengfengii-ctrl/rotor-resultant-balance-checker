@@ -217,6 +217,58 @@ test("响应返回前修正越界质量：过期的校验错误被丢弃，新�
   await expect(page.getByTestId("verdict")).toHaveText("放行");
 });
 
+test("核验等待中可立即清空：在途结果失效，页面保持清空", async ({ page }) => {
+  await delayVerifyApi(page, 600);
+
+  await page.getByTestId("mass-input-0").fill("100");
+  await page.getByTestId("mass-input-6").fill("90");
+  await page.getByRole("button", { name: "核验" }).click();
+
+  // 等待响应期间清空按钮立即可用
+  const clearButton = page.getByRole("button", { name: "清空" });
+  await expect(clearButton).toBeEnabled();
+  await clearButton.click();
+
+  // 录入与计数立即复位
+  await expect(page.getByTestId("mass-input-0")).toHaveValue("");
+  await expect(page.getByTestId("mass-input-6")).toHaveValue("");
+  await expect(page.getByTestId("filled-count")).toHaveText("已录入 0 支试管");
+
+  // 迟到的在途结果一律失效：不出现结论，页面保持清空
+  await page.waitForTimeout(1200);
+  await expect(page.getByTestId("verdict")).toHaveCount(0);
+  await expect(page.getByTestId("result-empty")).toBeVisible();
+});
+
+test("核验等待中修改孔位后：立即允许按当前载荷重新核验", async ({ page }) => {
+  await delayVerifyApi(page, 600);
+
+  await page.getByTestId("mass-input-0").fill("100");
+  await page.getByTestId("mass-input-6").fill("90");
+  await page.getByRole("button", { name: "核验" }).click();
+
+  // 等待响应期间修改孔位形成新载荷：核验按钮立即恢复可用
+  await page.getByTestId("mass-input-6").fill("100");
+  const submitButton = page.getByRole("button", { name: "核验" });
+  await expect(submitButton).toBeEnabled();
+
+  // 立即按当前载荷重新核验，得到唯一结论（在途旧响应被丢弃）
+  await submitButton.click();
+  await expect(page.getByTestId("verdict")).toHaveText("放行");
+  await expect(page.getByTestId("residual")).toHaveText("0.00");
+});
+
+test("非法质量不计入已录入试管数", async ({ page }) => {
+  await page.getByTestId("mass-input-0").fill("-5");
+  await page.getByTestId("mass-input-1").fill("501");
+  await page.getByTestId("mass-input-2").fill("99999999999999999999");
+  await expect(page.getByTestId("filled-count")).toHaveText("已录入 0 支试管");
+
+  await page.getByTestId("mass-input-3").fill("100");
+  await page.getByTestId("mass-input-4").fill("500");
+  await expect(page.getByTestId("filled-count")).toHaveText("已录入 2 支试管");
+});
+
 test.describe("对置差异诊断", () => {
   test("拒绝时展示差异最大的三对及贡献，放行时不展开", async ({ page }) => {
     await page.getByTestId("mass-input-3").fill("81");

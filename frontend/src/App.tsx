@@ -35,7 +35,8 @@ export default function App() {
   // 该次响应（结论 / 建议 / 422 错误）一律作废，以当前载荷重新核验为准。
   const loadVersionRef = useRef(0);
 
-  // 修改任何孔位：立即清除旧结论与旧错误，绝不沿用上一次放行结果
+  // 修改任何孔位：立即清除旧结论与旧错误，绝不沿用上一次放行结果；
+  // 同时结束「核验中」状态（在途响应由版本号机制作废），允许立即重新核验
   const handleChange = useCallback((hole: number, value: string) => {
     loadVersionRef.current += 1;
     setInputs((prev) => prev.map((v, i) => (i === hole ? value : v)));
@@ -44,6 +45,7 @@ export default function App() {
     setFieldErrors({});
     setConditionErrors({});
     setGeneralErrors([]);
+    setPending(false);
   }, []);
 
   // 修改工况参数与修改孔位同效：旧结论与旧离心力立即清除
@@ -60,6 +62,7 @@ export default function App() {
       setFieldErrors({});
       setConditionErrors({});
       setGeneralErrors([]);
+      setPending(false);
     },
     [],
   );
@@ -74,6 +77,7 @@ export default function App() {
     setFieldErrors({});
     setConditionErrors({});
     setGeneralErrors([]);
+    setPending(false);
   }, []);
 
   // 应用配平建议：把建议质量写入对应空孔并清除旧结论，
@@ -96,6 +100,7 @@ export default function App() {
     setFieldErrors({});
     setConditionErrors({});
     setGeneralErrors([]);
+    setPending(false);
   }, []);
 
   // 点选拒绝面板中的对置差异：转子图只高亮该对两孔；再次点选同一对取消高亮。
@@ -152,7 +157,11 @@ export default function App() {
         ]);
       }
     } finally {
-      setPending(false);
+      // 载荷在等待期间被修改时，pending 已由修改处理器复位（可能已有新请求
+      // 在途）；此处仅当版本未变才复位，避免在途的旧请求关掉新请求的状态
+      if (loadVersionRef.current === submittedVersion) {
+        setPending(false);
+      }
     }
   }, [inputs, speedInput, radiusInput]);
 
@@ -210,7 +219,7 @@ export default function App() {
             >
               {pending ? "核验中…" : "核验"}
             </button>
-            <button type="button" onClick={handleClear} disabled={pending}>
+            <button type="button" onClick={handleClear}>
               清空
             </button>
             <span className="filled-count" data-testid="filled-count">

@@ -47,7 +47,25 @@ export function buildTubes(inputs: string[]): BuildResult {
   return { tubes, holes, fieldErrors };
 }
 
-/** 有效录入（非空且为整数、非 0）的试管数量，用于界面提示。 */
+/** 合法质量范围：与 API 校验规则一致（1–500 克整数）。 */
+export const MIN_MASS_G = 1;
+export const MAX_MASS_G = 500;
+
+/**
+ * 合法录入（1–500 克整数）的试管数量，用于界面提示。
+ * 空孔、非整数、越界（负数、超过 500 克或超大整数）一律不计入。
+ */
 export function countFilled(inputs: string[]): number {
-  return buildTubes(inputs).tubes.length;
+  let count = 0;
+  for (const raw of inputs) {
+    const text = raw.trim();
+    if (text === "" || !INTEGER_PATTERN.test(text)) {
+      continue;
+    }
+    const mass = Number.parseInt(text, 10);
+    if (mass >= MIN_MASS_G && mass <= MAX_MASS_G) {
+      count += 1;
+    }
+  }
+  return count;
 }
