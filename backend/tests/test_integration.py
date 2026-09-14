@@ -222,3 +222,35 @@ class TestLiveServer:
         assert resp.status_code == 422
         detail = resp.json()["detail"]
         assert any(e["loc"][-1] == "weighing_error_g" for e in detail)
+
+    def test_weighing_error_trailing_zero_three_decimals_over_http(self, http):
+        # 原始 JSON 字面量 0.500（三位小数、末位为零）必须被拒绝，
+        # 不得按 0.5 继续核验
+        resp = http.post(
+            "/api/verify",
+            content=(
+                b'{"tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],'
+                b' "weighing_error_g": 0.500}'
+            ),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(e["loc"][-1] == "weighing_error_g" for e in detail)
+        assert any("两位小数" in e["msg"] for e in detail)
+
+    def test_weighing_error_two_decimal_trailing_zero_over_http(self, http):
+        # 两位小数末位为零（0.50）合法，评估正常返回
+        resp = http.post(
+            "/api/verify",
+            content=(
+                b'{"tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],'
+                b' "weighing_error_g": 0.50}'
+            ),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        assessment = resp.json()["error_assessment"]
+        assert assessment["error_per_tube_g"] == pytest.approx(0.5)
+        assert assessment["lower_bound_display"] == "3.00"
+        assert assessment["upper_bound_display"] == "5.00"

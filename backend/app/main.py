@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
+from decimal import Decimal
+from typing import Any
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import APIRoute
 
 from .models import (
     ContributionOut,
@@ -41,12 +45,38 @@ app.add_middleware(
 )
 
 
+class DecimalJsonRoute(APIRoute):
+    """以 parse_float=Decimal 解析 JSON 请求体的路由。
+
+    保留请求数值的原始小数位（0.500 不会塌缩为 0.5），使称量误差
+    “最多两位小数”的校验能按调用方提交的字面量判定；校验流程、
+    422 错误格式与 OpenAPI 文档仍完全由 FastAPI 原生机制产生。
+    """
+
+    def get_route_handler(self):
+        original_handler = super().get_route_handler()
+
+        async def handler(request: Request) -> Response:
+            body = await request.body()
+
+            async def json_decimal() -> Any:
+                return json.loads(body, parse_float=Decimal)
+
+            request.json = json_decimal  # type: ignore[method-assign]
+            return await original_handler(request)
+
+        return handler
+
+
+router = APIRouter(route_class=DecimalJsonRoute)
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/api/verify", response_model=VerifyResponse)
+@router.post("/api/verify", response_model=VerifyResponse)
 def verify(request: VerifyRequest) -> VerifyResponse:
     loads = [TubeLoad(hole=t.hole, mass_g=t.mass_g) for t in request.tubes]
     result = compute_resultant(loads)
@@ -142,3 +172,6 @@ def verify(request: VerifyRequest) -> VerifyResponse:
         opposite_differences=opposite_out,
         error_assessment=assessment_out,
     )
+
+
+app.include_router(router)

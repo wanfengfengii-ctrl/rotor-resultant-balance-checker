@@ -759,3 +759,42 @@ class TestWeighingError:
         )
         assert resp.status_code == 200
         assert resp.json()["error_assessment"]["error_per_tube_g"] == pytest.approx(ok)
+
+    @pytest.mark.parametrize(
+        "literal", ["0.500", "2.500", "4.990", "0.050", "1.230", "5.000"]
+    )
+    def test_three_decimals_with_trailing_zero_rejected(self, literal):
+        # 原始 JSON 字面量为三位小数（即使末位是 0）也必须拒绝，
+        # 不得塌缩为两位小数后继续核验
+        resp = client.post(
+            "/api/verify",
+            content=(
+                '{"tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],'
+                f' "weighing_error_g": {literal}}}'
+            ).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(e["loc"][-1] == "weighing_error_g" for e in detail), detail
+        assert any("两位小数" in e["msg"] for e in detail)
+
+    @pytest.mark.parametrize("literal", ["0.5", "0.50", "5.00", "0.05", "2.50"])
+    def test_two_decimals_with_trailing_zero_accepted(self, literal):
+        # 两位小数（含末位零）合法，按数值正常评估
+        resp = client.post(
+            "/api/verify",
+            content=(
+                '{"tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],'
+                f' "weighing_error_g": {literal}}}'
+            ).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        assessment = resp.json()["error_assessment"]
+        value = float(literal)
+        assert assessment["error_per_tube_g"] == pytest.approx(value)
+        # 区间仍按 E = N×误差、[max(0, R−E), R+E] 复算（R = 4，N = 2）
+        assert assessment["total_error_g"] == pytest.approx(2 * value)
+        assert assessment["lower_bound_g"] == pytest.approx(max(0.0, 4.0 - 2 * value))
+        assert assessment["upper_bound_g"] == pytest.approx(4.0 + 2 * value)

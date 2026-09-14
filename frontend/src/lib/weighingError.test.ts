@@ -47,6 +47,20 @@ describe("buildWeighingError", () => {
     }
   });
 
+  it("三位小数即使末位为零也按超过两位小数拒绝", () => {
+    for (const raw of ["0.500", "2.500", "0.050", "4.990"]) {
+      const result = buildWeighingError(raw);
+      expect(result.value).toBeNull();
+      expect(result.error).toContain("两位小数");
+    }
+  });
+
+  it("两位小数末位为零可以提交", () => {
+    expect(buildWeighingError("0.50").value).toBe(0.5);
+    expect(buildWeighingError("5.00").value).toBe(5);
+    expect(buildWeighingError("2.50").value).toBe(2.5);
+  });
+
   it("超出 0–5 克范围给出字段错误", () => {
     for (const raw of ["-0.1", "-1", "5.01", "6", "100"]) {
       const result = buildWeighingError(raw);

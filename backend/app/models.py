@@ -91,20 +91,30 @@ class VerifyRequest(BaseModel):
             raise ValueError("至少需要两支试管")
         return value
 
-    @field_validator("weighing_error_g")
+    @field_validator("weighing_error_g", mode="before")
     @classmethod
-    def weighing_error_valid(cls, value: Optional[float]) -> Optional[float]:
+    def weighing_error_valid(cls, value: object) -> Optional[float]:
+        """称量误差：数值、0–5 克、最多两位小数。
+
+        请求体以 parse_float=Decimal 解析（见 main.DecimalJsonRoute），此处
+        在 Pydantic 强制转换之前检查 JSON 字面量的小数位：0.500 这类三位
+        小数（末位为零）同样被拒绝，而不是塌缩为 0.5 后继续核验。
+        """
         if value is None:
-            return value
-        if not MIN_WEIGHING_ERROR_G <= value <= MAX_WEIGHING_ERROR_G:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+            raise ValueError("称量误差必须为数值")
+        dec = value if isinstance(value, Decimal) else Decimal(str(value))
+        if not dec.is_finite() or not (
+            MIN_WEIGHING_ERROR_G <= dec <= MAX_WEIGHING_ERROR_G
+        ):
             raise ValueError(
                 f"称量误差必须在 {MIN_WEIGHING_ERROR_G:g} 至 "
                 f"{MAX_WEIGHING_ERROR_G:g} 克之间"
             )
-        # 最多两位小数：str(浮点) 给出最短十进制表示，直接检查其小数位
-        if Decimal(str(value)).as_tuple().exponent < -WEIGHING_ERROR_MAX_DECIMALS:
+        if dec.as_tuple().exponent < -WEIGHING_ERROR_MAX_DECIMALS:
             raise ValueError("称量误差最多两位小数")
-        return value
+        return float(dec)
 
     @model_validator(mode="after")
     def holes_must_be_unique(self) -> "VerifyRequest":

@@ -724,6 +724,20 @@ test.describe("称量误差评估", () => {
     await expect(page.getByTestId("error-assessment")).toHaveCount(0);
   });
 
+  test("三位小数末位为零（0.500）同样按超过两位小数拒绝", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("96");
+    await page.getByTestId("weighing-error-input").fill("0.500");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("weighing-error-error")).toContainText(
+      "两位小数",
+    );
+    await expect(page.getByTestId("weighing-error-input")).toHaveValue("0.500");
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+    await expect(page.getByTestId("error-assessment")).toHaveCount(0);
+  });
+
   test("误差超出 0–5 克：错误定位到误差输入框", async ({ page }) => {
     await page.getByTestId("mass-input-0").fill("100");
     await page.getByTestId("mass-input-6").fill("96");
