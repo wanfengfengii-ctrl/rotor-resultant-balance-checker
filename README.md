@@ -4,7 +4,9 @@
 不平衡量并给出唯一结论（放行 / 拒绝），前端展示每个非空孔的贡献、合成方向与结论。
 核验被拒绝时，后端还会尝试给出一次加管即可放行的配平建议，操作员可一键应用后
 重新核验。除偏载结论外，还可选填本次转速与转子有效半径，由未舍入残余量换算
-离心力，帮助操作员避免相同残余量在高速工况下被低估。
+离心力，帮助操作员避免相同残余量在高速工况下被低估。称量设备存在标称误差时，
+操作员可再选填每支试管统一的称量误差，后端按未舍入残余量给出可信区间与
+确定放行 / 确定拒绝 / 临界待复称 的误差评估。
 
 ## 计算公式与判定规则
 
@@ -85,6 +87,28 @@ F (N) = (R / 1000) · (r / 1000) · (2πn / 60)²
 - 只填一项、输入非整数或超出范围时，错误定位到对应的工况输入框，页面不展示
   旧结论或旧离心力（与孔位录入错误同规则）。
 
+## 可选称量误差与误差评估
+
+称量设备的标称误差会让接近 5.00 g 阈值的结果缺少可信边界。操作员可在录入区
+选填**每支试管统一的称量误差（克，0–5、最多两位小数）**，随核验请求一并提交；
+后端复用**未舍入残余量 R** 与**有效试管数 N**（提交的非空试管数）计算：
+
+```
+E = N × 每支误差                ← 总误差（克）
+区间 = [max(0, R − E), R + E]   ← 残余量可信区间
+```
+
+- **上界不超过 5.00 g → 确定放行**；**下界大于 5.00 g → 确定拒绝**；
+  其余（区间跨越阈值）→ **临界待复称**。
+- 评估随响应的可空字段 `error_assessment` 返回；**请求省略误差时不返回评估**，
+  既有判定、诊断、工况换算与调用方保持兼容。
+- 结果面板在原结论旁展示评估标签、区间与总误差；临界时额外给出复称提示。
+  误差评估只描述称量不确定性：**放行阈值、方向、贡献明细、对置诊断与配平建议
+  仍完全由名义残余量的质量矢量链路决定**。
+- 修改孔位、工况或误差输入后立即清除旧结论与旧评估，在途响应按既有规则作废；
+  非法误差（越界、超过两位小数、非数字）的字段反馈定位到误差输入框，
+  **不覆盖当前输入内容**。
+
 ## 校验规则（API 强制）
 
 - 每个非空孔只能提交一次：**重复孔位** → 422；
@@ -95,12 +119,16 @@ F (N) = (R / 1000) · (r / 1000) · (2πn / 60)²
   （只给一项时缺失项 → 422 定位到该字段），均为 **100–30000 转/分钟** 与
   **10–500 毫米** 范围内的整数（strict 模式），越界 / 非整数 → 422 定位到对应字段；
   省略整个 `condition` 即按原方式核验。
+- 称量误差（可选）：`weighing_error_g` 为 **0–5 克且最多两位小数** 的数值
+  （strict 模式拒绝字符串等非数值），越界 / 小数位过多 / 非数值 → 422 定位到
+  `["body", "weighing_error_g"]`；省略该字段即不做误差评估。
 
 422 响应为 Pydantic 逐字段错误（`detail[].loc` 定位到具体试管与字段，或
-`["body", "condition", "speed_rpm" | "radius_mm"]` 定位到工况输入），前端把
-错误映射回对应孔位输入框或工况输入框；无法定位的错误（重复孔位、数量不足）
-显示为通用错误。**修改任何孔位或工况输入后立即清除旧结论；校验失败只显示错误，
-绝不沿用上一次放行结果。**
+`["body", "condition", "speed_rpm" | "radius_mm"]` 定位到工况输入，或
+`["body", "weighing_error_g"]` 定位到称量误差输入），前端把
+错误映射回对应孔位输入框、工况输入框或误差输入框；无法定位的错误（重复孔位、
+数量不足）显示为通用错误。**修改任何孔位、工况或误差输入后立即清除旧结论；
+校验失败只显示错误，绝不沿用上一次放行结果。**
 
 核验请求在飞行途中时，任何录入修改（含清空、应用建议）都会使该次请求作废：
 迟到的响应——无论结论、配平建议还是 422 校验错误——一律丢弃，页面保持清空，
@@ -168,12 +196,14 @@ cd frontend && PLAYWRIGHT_BASE_URL=http://localhost:5173 npx playwright test
 ```json
 {
   "tubes": [ { "hole": 0, "mass_g": 100 }, { "hole": 6, "mass_g": 90 } ],
-  "condition": { "speed_rpm": 3000, "radius_mm": 100 }
+  "condition": { "speed_rpm": 3000, "radius_mm": 100 },
+  "weighing_error_g": 0.5
 }
 ```
 
 `condition` 可整体省略（或两项都不填的等价前端行为），此时响应 `condition`
-为 `null`，其余字段与既有调用完全一致。
+为 `null`，其余字段与既有调用完全一致。`weighing_error_g` 可省略，此时响应
+`error_assessment` 为 `null`。
 
 200 响应（节选）：
 
@@ -200,6 +230,18 @@ cd frontend && PLAYWRIGHT_BASE_URL=http://localhost:5173 npx playwright test
     "radius_mm": 100,
     "centrifugal_force_n": 98.69604401089359,
     "centrifugal_force_display": "98.70"
+  },
+  "error_assessment": {
+    "error_per_tube_g": 0.5,
+    "tube_count": 2,
+    "total_error_g": 1.0,
+    "total_error_display": "1.00",
+    "lower_bound_g": 9.0,
+    "lower_bound_display": "9.00",
+    "upper_bound_g": 11.0,
+    "upper_bound_display": "11.00",
+    "kind": "definite_reject",
+    "label": "确定拒绝"
   }
 }
 ```
@@ -223,8 +265,20 @@ cd frontend && PLAYWRIGHT_BASE_URL=http://localhost:5173 npx playwright test
   "x_g": 10.0, "y_g": 0.0, "x_display": "10.00", "y_display": "0.00" }`；
   `delta_g = first_mass_g − opposite_mass_g` 为有符号差值，六对 `x_g` /
   `y_g` 之和分别等于响应的 `x_g` / `y_g`。面板只展示其中前三对。
+- `error_assessment` 为可空字段（兼容既有调用方）：仅请求带
+  `weighing_error_g` 时非空，省略误差时应答为 `null`。形如
+  `{ "error_per_tube_g": 0.5, "tube_count": 2, "total_error_g": 1.0,
+  "total_error_display": "1.00", "lower_bound_g": 3.0,
+  "lower_bound_display": "3.00", "upper_bound_g": 5.0,
+  "upper_bound_display": "5.00", "kind": "definite_pass",
+  "label": "确定放行" }`；`kind` 为机器可读分支（`definite_pass` /
+  `definite_reject` / `borderline`），`label` 为对应展示标签
+  （确定放行 / 确定拒绝 / 临界待复称）。区间由未舍入残余量 R 与有效试管数
+  N 按 `E = N × 误差`、`[max(0, R−E), R+E]` 计算；评估不影响名义残余量的
+  放行判定、配平建议、对置诊断与工况换算。
 - 校验失败返回 422，`detail` 为逐字段错误列表，工况错误的 `loc` 形如
-  `["body", "condition", "speed_rpm"]` / `["body", "condition", "radius_mm"]`。
+  `["body", "condition", "speed_rpm"]` / `["body", "condition", "radius_mm"]`，
+  称量误差错误的 `loc` 为 `["body", "weighing_error_g"]`。
 
 `GET /api/health` → `{ "status": "ok" }`
 
@@ -237,7 +291,7 @@ backend/            FastAPI 应用
   app/main.py       路由与 CORS
   tests/            pytest：计算、API、活服务联调
 frontend/           React + Vite + TypeScript
-  src/lib/          载荷整理、422 错误映射（Vitest 覆盖）
+  src/lib/          载荷整理、工况与称量误差录入、422 错误映射（Vitest 覆盖）
   src/components/   转子视图（顺时针 12 孔 + 合成箭头）、结果面板
   e2e/              Playwright 端到端
 verify/             一次性验收服务（pytest + Vitest + Playwright）

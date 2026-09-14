@@ -63,6 +63,26 @@ describe("mapValidationErrors", () => {
     expect(conditionErrors.speed_rpm).toBe("缺少必填字段");
     expect(generalErrors).toEqual([]);
   });
+
+  it("称量误差错误定位到误差输入框而非孔位或通用错误", () => {
+    const details = [
+      detail(["body", "weighing_error_g"], "称量误差必须在 0 至 5 克之间"),
+    ];
+    const { fieldErrors, conditionErrors, weighingErrorError, generalErrors } =
+      mapValidationErrors(details, [0, 6]);
+    expect(weighingErrorError).toBe("称量误差必须在 0 至 5 克之间");
+    expect(fieldErrors).toEqual({});
+    expect(conditionErrors).toEqual({});
+    expect(generalErrors).toEqual([]);
+  });
+
+  it("未提交误差字段时误差反馈为空", () => {
+    const details = [
+      detail(["body", "tubes", 0, "mass_g"], "质量必须在 1 至 500 克之间"),
+    ];
+    const { weighingErrorError } = mapValidationErrors(details, [0]);
+    expect(weighingErrorError).toBeUndefined();
+  });
 });
 
 describe("translateMessage", () => {

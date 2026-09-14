@@ -159,3 +159,66 @@ class TestLiveServer:
         )
         assert resp.status_code == 200
         assert resp.json()["opposite_differences"] is None
+
+    def test_omitted_weighing_error_is_null_over_http(self, http):
+        resp = http.post(
+            "/api/verify",
+            json={"tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["error_assessment"] is None
+
+    def test_weighing_error_example_over_http(self, http):
+        # 残余量 4 g、两支试管、每支误差 0.5 g → 区间 [3.00, 5.00]，确定放行
+        resp = http.post(
+            "/api/verify",
+            json={
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],
+                "weighing_error_g": 0.5,
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["balanced"] is True
+        assessment = body["error_assessment"]
+        assert assessment["tube_count"] == 2
+        assert assessment["total_error_display"] == "1.00"
+        assert assessment["lower_bound_display"] == "3.00"
+        assert assessment["upper_bound_display"] == "5.00"
+        assert assessment["kind"] == "definite_pass"
+        assert assessment["label"] == "确定放行"
+
+    def test_weighing_error_branches_over_http(self, http):
+        # 临界：区间 [2.50, 5.50] 跨阈值
+        borderline = http.post(
+            "/api/verify",
+            json={
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],
+                "weighing_error_g": 0.75,
+            },
+        ).json()["error_assessment"]
+        assert borderline["kind"] == "borderline"
+        assert borderline["label"] == "临界待复称"
+
+        # 确定拒绝：区间 [9.00, 11.00] 下界大于 5 g
+        rejected = http.post(
+            "/api/verify",
+            json={
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 90}],
+                "weighing_error_g": 0.5,
+            },
+        ).json()["error_assessment"]
+        assert rejected["kind"] == "definite_reject"
+        assert rejected["label"] == "确定拒绝"
+
+    def test_weighing_error_validation_over_http(self, http):
+        resp = http.post(
+            "/api/verify",
+            json={
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],
+                "weighing_error_g": 0.505,
+            },
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(e["loc"][-1] == "weighing_error_g" for e in detail)

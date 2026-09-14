@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -11,9 +12,12 @@ from .physics import (
     MAX_MASS_G,
     MAX_RADIUS_MM,
     MAX_SPEED_RPM,
+    MAX_WEIGHING_ERROR_G,
     MIN_MASS_G,
     MIN_RADIUS_MM,
     MIN_SPEED_RPM,
+    MIN_WEIGHING_ERROR_G,
+    WEIGHING_ERROR_MAX_DECIMALS,
 )
 
 
@@ -76,12 +80,30 @@ class VerifyRequest(BaseModel):
     tubes: List[Tube]
     # 两项工况参数成对可选：省略整个对象或两项都不填时为 None（按原方式核验）
     condition: Optional[OperatingConditionIn] = None
+    # 可选称量误差：每支试管统一的标称误差（克）；省略时不做误差评估，
+    # 响应不含 error_assessment，既有判定与调用方保持兼容
+    weighing_error_g: Optional[float] = None
 
     @field_validator("tubes")
     @classmethod
     def at_least_two_tubes(cls, value: List[Tube]) -> List[Tube]:
         if len(value) < 2:
             raise ValueError("至少需要两支试管")
+        return value
+
+    @field_validator("weighing_error_g")
+    @classmethod
+    def weighing_error_valid(cls, value: Optional[float]) -> Optional[float]:
+        if value is None:
+            return value
+        if not MIN_WEIGHING_ERROR_G <= value <= MAX_WEIGHING_ERROR_G:
+            raise ValueError(
+                f"称量误差必须在 {MIN_WEIGHING_ERROR_G:g} 至 "
+                f"{MAX_WEIGHING_ERROR_G:g} 克之间"
+            )
+        # 最多两位小数：str(浮点) 给出最短十进制表示，直接检查其小数位
+        if Decimal(str(value)).as_tuple().exponent < -WEIGHING_ERROR_MAX_DECIMALS:
+            raise ValueError("称量误差最多两位小数")
         return value
 
     @model_validator(mode="after")
@@ -134,6 +156,23 @@ class OppositeDifferenceOut(BaseModel):
     y_display: str
 
 
+class ErrorAssessmentOut(BaseModel):
+    """称量误差评估：残余量可信区间 [max(0, R−E), R+E] 与三分支结论。"""
+
+    error_per_tube_g: float
+    tube_count: int
+    total_error_g: float
+    total_error_display: str
+    lower_bound_g: float
+    lower_bound_display: str
+    upper_bound_g: float
+    upper_bound_display: str
+    # 机器可读分支：definite_pass / definite_reject / borderline
+    kind: str
+    # 展示标签：“确定放行” / “确定拒绝” / “临界待复称”
+    label: str
+
+
 class VerifyResponse(BaseModel):
     balanced: bool
     verdict: str  # “放行” 或 “拒绝”
@@ -154,3 +193,6 @@ class VerifyResponse(BaseModel):
     # 对置差异诊断（可选，兼容旧版调用方）：仅拒绝时给出按绝对差值降序、
     # 并列时较小孔号升序排列的六对结果；放行时为 null
     opposite_differences: Optional[List[OppositeDifferenceOut]] = None
+    # 称量误差评估（可选，兼容既有调用方）：仅请求带 weighing_error_g 时非空；
+    # 省略误差时为 null。评估不影响名义残余量的放行 / 拒绝判定
+    error_assessment: Optional[ErrorAssessmentOut] = None

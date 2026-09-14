@@ -10,6 +10,7 @@ from app.physics import (
     TOLERANCE_G,
     TubeLoad,
     centrifugal_force_n,
+    compute_error_assessment,
     compute_opposite_differences,
     compute_resultant,
     direction_display,
@@ -341,3 +342,80 @@ class TestRound2Display:
     )
     def test_half_up_rounding(self, value, expected):
         assert round2_display(value) == expected
+
+
+class TestErrorAssessment:
+    def test_example_interval_3_to_5_is_definite_pass(self):
+        # 残余量 4 g、两支试管、每支误差 0.5 g：E = 2×0.5 = 1 g，
+        # 区间 [3, 5]，上界不超过 5 g → 确定放行
+        assessment = compute_error_assessment(4.0, 2, 0.5)
+        assert assessment.total_error_g == pytest.approx(1.0)
+        assert assessment.lower_bound_g == pytest.approx(3.0)
+        assert assessment.upper_bound_g == pytest.approx(5.0)
+        assert assessment.kind == "definite_pass"
+        assert assessment.label == "确定放行"
+        assert assessment.tube_count == 2
+        assert assessment.error_per_tube_g == 0.5
+
+    def test_interval_crossing_threshold_is_borderline(self):
+        # 阈值另一侧：同一残余量 4 g，每支误差 0.75 g → 区间 [2.5, 5.5] 跨阈值
+        assessment = compute_error_assessment(4.0, 2, 0.75)
+        assert assessment.total_error_g == pytest.approx(1.5)
+        assert assessment.lower_bound_g == pytest.approx(2.5)
+        assert assessment.upper_bound_g == pytest.approx(5.5)
+        assert assessment.kind == "borderline"
+        assert assessment.label == "临界待复称"
+
+    def test_lower_bound_above_threshold_is_definite_reject(self):
+        # 残余量 10 g、两支试管、每支误差 0.5 g → 区间 [9, 11]，下界大于 5 g
+        assessment = compute_error_assessment(10.0, 2, 0.5)
+        assert assessment.lower_bound_g == pytest.approx(9.0)
+        assert assessment.upper_bound_g == pytest.approx(11.0)
+        assert assessment.kind == "definite_reject"
+        assert assessment.label == "确定拒绝"
+
+    def test_lower_bound_clamped_to_zero(self):
+        # 总误差大于残余量时下界截断为 0，不得出现负区间
+        assessment = compute_error_assessment(4.0, 2, 5.0)
+        assert assessment.total_error_g == pytest.approx(10.0)
+        assert assessment.lower_bound_g == 0.0
+        assert assessment.upper_bound_g == pytest.approx(14.0)
+        assert assessment.kind == "borderline"
+
+    def test_zero_error_collapses_interval_to_residual(self):
+        passing = compute_error_assessment(4.0, 2, 0.0)
+        assert (passing.lower_bound_g, passing.upper_bound_g) == (4.0, 4.0)
+        assert passing.kind == "definite_pass"
+
+        rejected = compute_error_assessment(10.0, 2, 0.0)
+        assert (rejected.lower_bound_g, rejected.upper_bound_g) == (10.0, 10.0)
+        assert rejected.kind == "definite_reject"
+
+    def test_upper_bound_exactly_at_threshold_is_definite_pass(self):
+        # 上界恰为 5.00 g：与放行判定同规则（不超过即放行）
+        assessment = compute_error_assessment(4.0, 2, 0.5)
+        assert assessment.upper_bound_g == pytest.approx(TOLERANCE_G)
+        assert assessment.kind == "definite_pass"
+
+    def test_lower_bound_exactly_at_threshold_is_borderline(self):
+        # 下界恰为 5.00 g 而未超过：区间仍触及阈值 → 临界待复称
+        assessment = compute_error_assessment(6.0, 2, 0.5)
+        assert assessment.lower_bound_g == pytest.approx(TOLERANCE_G)
+        assert assessment.upper_bound_g == pytest.approx(7.0)
+        assert assessment.kind == "borderline"
+
+    def test_uses_unrounded_residual(self):
+        # 残余量 5.004（显示 5.00）：区间必须按未舍入值计算，
+        # 零误差下下界 5.004 > 5 → 确定拒绝，与名义判定一致
+        assessment = compute_error_assessment(5.004, 2, 0.0)
+        assert round2_display(5.004) == "5.00"
+        assert assessment.lower_bound_g == pytest.approx(5.004)
+        assert assessment.kind == "definite_reject"
+
+    def test_total_error_scales_with_tube_count(self):
+        # E = N × 每支误差：同样的每支误差，试管越多区间越宽
+        two = compute_error_assessment(4.0, 2, 0.5)
+        six = compute_error_assessment(4.0, 6, 0.5)
+        assert two.total_error_g == pytest.approx(1.0)
+        assert six.total_error_g == pytest.approx(3.0)
+        assert six.kind == "borderline"

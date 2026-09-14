@@ -38,6 +38,11 @@ MAX_SPEED_RPM = 30000
 MIN_RADIUS_MM = 10
 MAX_RADIUS_MM = 500
 
+# 可选称量误差（每支试管统一）：0–5 克、最多两位小数
+MIN_WEIGHING_ERROR_G = 0.0
+MAX_WEIGHING_ERROR_G = 5.0
+WEIGHING_ERROR_MAX_DECIMALS = 2
+
 _ZERO_EPS = 1e-9
 
 # 两个候选的预测残余量差异低于该值时视为并列，按质量较小、孔号较小决胜。
@@ -201,6 +206,66 @@ def compute_resultant(loads: Iterable[TubeLoad]) -> RotorResult:
         direction_deg=direction,
         balanced=residual <= TOLERANCE_G,
         contributions=tuple(contributions),
+    )
+
+
+# 误差评估分支（机器可读），与展示标签一一对应
+ASSESSMENT_DEFINITE_PASS = "definite_pass"
+ASSESSMENT_DEFINITE_REJECT = "definite_reject"
+ASSESSMENT_BORDERLINE = "borderline"
+
+ASSESSMENT_LABELS = {
+    ASSESSMENT_DEFINITE_PASS: "确定放行",
+    ASSESSMENT_DEFINITE_REJECT: "确定拒绝",
+    ASSESSMENT_BORDERLINE: "临界待复称",
+}
+
+
+@dataclass(frozen=True)
+class ErrorAssessment:
+    """称量误差评估：残余量可信区间与三分支结论。
+
+    以未舍入残余量 R 与有效试管数 N 计算总误差 E = N × 每支误差，
+    区间为 [max(0, R − E), R + E]：
+    - 上界不超过放行阈值 → 确定放行；
+    - 下界大于放行阈值 → 确定拒绝；
+    - 其余（区间跨越阈值）→ 临界待复称。
+    """
+
+    error_per_tube_g: float
+    tube_count: int
+    total_error_g: float
+    lower_bound_g: float
+    upper_bound_g: float
+    kind: str  # ASSESSMENT_DEFINITE_PASS / ASSESSMENT_DEFINITE_REJECT / ASSESSMENT_BORDERLINE
+    label: str  # “确定放行” / “确定拒绝” / “临界待复称”
+
+
+def compute_error_assessment(
+    residual_g: float, tube_count: int, error_per_tube_g: float
+) -> ErrorAssessment:
+    """按每支试管统一的称量误差评估残余量的可信区间。
+
+    判定与展示值一样基于未舍入残余量；该评估只描述称量误差带来的
+    不确定性，不改变名义残余量对应的放行 / 拒绝结论。
+    """
+    total_error = tube_count * error_per_tube_g
+    lower = max(0.0, residual_g - total_error)
+    upper = residual_g + total_error
+    if upper <= TOLERANCE_G:
+        kind = ASSESSMENT_DEFINITE_PASS
+    elif lower > TOLERANCE_G:
+        kind = ASSESSMENT_DEFINITE_REJECT
+    else:
+        kind = ASSESSMENT_BORDERLINE
+    return ErrorAssessment(
+        error_per_tube_g=error_per_tube_g,
+        tube_count=tube_count,
+        total_error_g=total_error,
+        lower_bound_g=lower,
+        upper_bound_g=upper,
+        kind=kind,
+        label=ASSESSMENT_LABELS[kind],
     )
 
 

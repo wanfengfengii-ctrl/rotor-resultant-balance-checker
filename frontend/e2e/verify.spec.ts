@@ -644,3 +644,194 @@ test.describe("可选工况与离心力", () => {
     await expect(page.getByTestId("radius-input")).toHaveValue("");
   });
 });
+
+test.describe("称量误差评估", () => {
+  test("残余 4 g、两支试管、每支误差 0.5 g：区间 3.00–5.00 g，确定放行", async ({
+    page,
+  }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("96");
+    await page.getByTestId("weighing-error-input").fill("0.5");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    // 名义结论保持放行，误差评估附在原结论旁
+    await expect(page.getByTestId("verdict")).toHaveText("放行");
+    await expect(page.getByTestId("assessment-label")).toContainText("确定放行");
+    await expect(page.getByTestId("assessment-interval")).toContainText(
+      "3.00–5.00",
+    );
+    await expect(page.getByTestId("assessment-total-error")).toContainText(
+      "1.00",
+    );
+    // 确定放行无需复称提示
+    await expect(page.getByTestId("reweigh-hint")).toHaveCount(0);
+  });
+
+  test("区间跨越阈值：临界待复称并给出复称提示", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("96");
+    await page.getByTestId("weighing-error-input").fill("0.75");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("verdict")).toHaveText("放行");
+    await expect(page.getByTestId("assessment-label")).toContainText(
+      "临界待复称",
+    );
+    await expect(page.getByTestId("assessment-interval")).toContainText(
+      "2.50–5.50",
+    );
+    await expect(page.getByTestId("reweigh-hint")).toContainText("复称");
+  });
+
+  test("下界大于阈值：确定拒绝", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("90");
+    await page.getByTestId("weighing-error-input").fill("0.5");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("verdict")).toHaveText("拒绝");
+    await expect(page.getByTestId("assessment-label")).toContainText("确定拒绝");
+    await expect(page.getByTestId("assessment-interval")).toContainText(
+      "9.00–11.00",
+    );
+    await expect(page.getByTestId("reweigh-hint")).toHaveCount(0);
+  });
+
+  test("留空误差不展示评估，核验行为与原来一致", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("96");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("verdict")).toHaveText("放行");
+    await expect(page.getByTestId("residual")).toHaveText("4.00");
+    await expect(page.getByTestId("error-assessment")).toHaveCount(0);
+  });
+
+  test("误差超过两位小数：字段反馈不覆盖当前输入，不出现结论", async ({
+    page,
+  }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("96");
+    await page.getByTestId("weighing-error-input").fill("0.555");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("weighing-error-error")).toContainText(
+      "两位小数",
+    );
+    // 非法值的字段反馈不得覆盖当前输入
+    await expect(page.getByTestId("weighing-error-input")).toHaveValue("0.555");
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+    await expect(page.getByTestId("error-assessment")).toHaveCount(0);
+  });
+
+  test("误差超出 0–5 克：错误定位到误差输入框", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("96");
+    await page.getByTestId("weighing-error-input").fill("5.01");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("weighing-error-error")).toContainText(
+      "0 至 5",
+    );
+    await expect(page.getByTestId("weighing-error-input")).toHaveValue("5.01");
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+  });
+
+  test("误差非数字：前端直接提示，不发出请求", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("96");
+    await page.getByTestId("weighing-error-input").fill("abc");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("weighing-error-error")).toContainText(
+      "数字",
+    );
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+  });
+
+  test("修改误差后立即清除旧结论与旧评估", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("96");
+    await page.getByTestId("weighing-error-input").fill("0.5");
+    await page.getByRole("button", { name: "核验" }).click();
+    await expect(page.getByTestId("assessment-label")).toContainText("确定放行");
+
+    await page.getByTestId("weighing-error-input").fill("0.75");
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+    await expect(page.getByTestId("error-assessment")).toHaveCount(0);
+    await expect(page.getByTestId("result-empty")).toBeVisible();
+
+    // 重新核验得到新区间与结论
+    await page.getByRole("button", { name: "核验" }).click();
+    await expect(page.getByTestId("assessment-label")).toContainText(
+      "临界待复称",
+    );
+  });
+
+  test("清空按钮同时复位称量误差输入", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("weighing-error-input").fill("0.5");
+    await page.getByRole("button", { name: "清空" }).click();
+
+    await expect(page.getByTestId("weighing-error-input")).toHaveValue("");
+  });
+
+  test("响应返回前修改误差：迟到的评估被丢弃，保持清空等待重新核验", async ({
+    page,
+  }) => {
+    await delayVerifyApi(page, 600);
+
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("96");
+    await page.getByTestId("weighing-error-input").fill("0.5");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    // 响应返回前修改误差：旧结论立即清除
+    await page.getByTestId("weighing-error-input").fill("0.75");
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+
+    // 迟到的确定放行评估不得回填
+    await page.waitForTimeout(1200);
+    await expect(page.getByTestId("verdict")).toHaveCount(0);
+    await expect(page.getByTestId("error-assessment")).toHaveCount(0);
+    await expect(page.getByTestId("result-empty")).toBeVisible();
+
+    // 按当前误差重新核验：临界待复称
+    await page.getByRole("button", { name: "核验" }).click();
+    await expect(page.getByTestId("assessment-label")).toContainText(
+      "临界待复称",
+    );
+    await expect(page.getByTestId("assessment-interval")).toContainText(
+      "2.50–5.50",
+    );
+  });
+
+  test("误差评估与工况离心力可同时展示", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("96");
+    await page.getByTestId("speed-input").fill("3000");
+    await page.getByTestId("radius-input").fill("100");
+    await page.getByTestId("weighing-error-input").fill("0.5");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("assessment-label")).toContainText("确定放行");
+    await expect(page.getByTestId("centrifugal-force")).toContainText(
+      "39.48 N",
+    );
+  });
+
+  test("拒绝时误差评估与配平建议并存，建议仍按名义残余量", async ({ page }) => {
+    await page.getByTestId("mass-input-0").fill("100");
+    await page.getByTestId("mass-input-6").fill("100");
+    await page.getByTestId("mass-input-3").fill("10");
+    await page.getByTestId("weighing-error-input").fill("0.5");
+    await page.getByRole("button", { name: "核验" }).click();
+
+    await expect(page.getByTestId("verdict")).toHaveText("拒绝");
+    await expect(page.getByTestId("assessment-label")).toContainText("确定拒绝");
+    // 配平建议仍由名义残余量产生：孔 9 加 10 g，预测残余 0.00 g
+    await expect(page.getByTestId("suggestion")).toContainText("9");
+    await expect(page.getByTestId("suggestion")).toContainText("10 g");
+    await expect(page.getByTestId("suggestion")).toContainText("0.00 g");
+  });
+});

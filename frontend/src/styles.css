@@ -272,6 +272,72 @@ body {
   font-size: 0.76rem;
 }
 
+/* ---------- 称量误差录入 ---------- */
+
+.weighing-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 18px;
+  justify-content: center;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+
+/* ---------- 误差评估 ---------- */
+
+.error-assessment {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 0.9rem;
+}
+
+.error-assessment.definite_pass {
+  background: rgba(46, 160, 67, 0.08);
+  border-color: var(--pass);
+}
+
+.error-assessment.definite_pass .assessment-item strong {
+  color: var(--pass);
+}
+
+.error-assessment.definite_reject {
+  background: rgba(229, 83, 75, 0.08);
+  border-color: var(--fail);
+}
+
+.error-assessment.definite_reject .assessment-item strong {
+  color: var(--fail);
+}
+
+.error-assessment.borderline {
+  background: rgba(210, 153, 34, 0.1);
+  border-color: #d29922;
+}
+
+.error-assessment.borderline .assessment-item strong {
+  color: #d29922;
+}
+
+.assessment-item {
+  font-variant-numeric: tabular-nums;
+}
+
+.assessment-note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
 .controls {
   display: flex;
   align-items: center;

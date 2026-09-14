@@ -49,6 +49,41 @@ export function ResultPanel({
         {result.verdict}
       </div>
 
+      {result.error_assessment && (
+        <div
+          className={`error-assessment ${result.error_assessment.kind}`}
+          data-testid="error-assessment"
+        >
+          <span className="assessment-item" data-testid="assessment-label">
+            误差评估 <strong>{result.error_assessment.label}</strong>
+          </span>
+          <span className="assessment-item" data-testid="assessment-interval">
+            残余量区间{" "}
+            <strong>
+              {result.error_assessment.lower_bound_display}–
+              {result.error_assessment.upper_bound_display}
+            </strong>{" "}
+            g
+          </span>
+          <span className="assessment-item" data-testid="assessment-total-error">
+            总误差 <strong>{result.error_assessment.total_error_display}</strong>{" "}
+            g（{result.error_assessment.tube_count} 支 ×{" "}
+            {result.error_assessment.error_per_tube_g} g）
+          </span>
+          {result.error_assessment.kind === "borderline" ? (
+            <span className="assessment-note" data-testid="reweigh-hint">
+              称量误差使残余量区间跨越 {result.threshold_g.toFixed(2)} g
+              阈值，结论不可信，请复称后重新核验。
+            </span>
+          ) : (
+            <span className="assessment-note" data-testid="assessment-note">
+              区间未跨越 {result.threshold_g.toFixed(2)} g
+              阈值；放行判定仍由名义残余量作出。
+            </span>
+          )}
+        </div>
+      )}
+
       {result.condition && (
         <div className="condition-result" data-testid="condition-result">
           <span className="condition-item" data-testid="condition-speed">

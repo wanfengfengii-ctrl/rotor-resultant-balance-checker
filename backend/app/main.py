@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .models import (
     ContributionOut,
+    ErrorAssessmentOut,
     OperatingConditionOut,
     OppositeDifferenceOut,
     SuggestionOut,
@@ -19,6 +20,7 @@ from .physics import (
     TOLERANCE_G,
     TubeLoad,
     centrifugal_force_n,
+    compute_error_assessment,
     compute_opposite_differences,
     compute_resultant,
     direction_display,
@@ -91,6 +93,25 @@ def verify(request: VerifyRequest) -> VerifyResponse:
             )
             for d in compute_opposite_differences(loads)
         ]
+    # 称量误差评估仅随填写了误差的请求返回：以未舍入残余量与有效试管数
+    # 计算可信区间；省略误差时为 None，既有判定与调用方不受影响
+    assessment_out = None
+    if request.weighing_error_g is not None:
+        assessment = compute_error_assessment(
+            result.residual_g, len(loads), request.weighing_error_g
+        )
+        assessment_out = ErrorAssessmentOut(
+            error_per_tube_g=assessment.error_per_tube_g,
+            tube_count=assessment.tube_count,
+            total_error_g=assessment.total_error_g,
+            total_error_display=round2_display(assessment.total_error_g),
+            lower_bound_g=assessment.lower_bound_g,
+            lower_bound_display=round2_display(assessment.lower_bound_g),
+            upper_bound_g=assessment.upper_bound_g,
+            upper_bound_display=round2_display(assessment.upper_bound_g),
+            kind=assessment.kind,
+            label=assessment.label,
+        )
     return VerifyResponse(
         balanced=result.balanced,
         verdict="放行" if result.balanced else "拒绝",
@@ -119,4 +140,5 @@ def verify(request: VerifyRequest) -> VerifyResponse:
         suggestion=suggestion,
         condition=condition_out,
         opposite_differences=opposite_out,
+        error_assessment=assessment_out,
     )

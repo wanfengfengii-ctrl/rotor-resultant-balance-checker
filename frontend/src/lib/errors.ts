@@ -23,6 +23,8 @@ export interface MappedErrors {
   fieldErrors: Record<number, string>;
   /** 键为工况字段（转速 / 有效半径） */
   conditionErrors: Partial<Record<ConditionField, string>>;
+  /** 称量误差输入框的字段错误 */
+  weighingErrorError?: string;
   generalErrors: string[];
 }
 
@@ -48,7 +50,8 @@ const CONDITION_FIELDS: ReadonlySet<string> = new Set(["speed_rpm", "radius_mm"]
 /**
  * 把 422 detail 列表映射回输入位置。
  * FastAPI 的 loc 形如 ["body", "tubes", <下标>, <字段>]；
- * 工况错误形如 ["body", "condition", <字段>]。
+ * 工况错误形如 ["body", "condition", <字段>]；
+ * 称量误差错误形如 ["body", "weighing_error_g"]。
  * 无法定位到具体孔位或工况字段的错误（如“孔位重复”“至少需要两支试管”）
  * 归入 generalErrors。
  */
@@ -58,6 +61,7 @@ export function mapValidationErrors(
 ): MappedErrors {
   const fieldErrors: Record<number, string> = {};
   const conditionErrors: Partial<Record<ConditionField, string>> = {};
+  let weighingErrorError: string | undefined;
   const generalErrors: string[] = [];
 
   for (const detail of details) {
@@ -82,6 +86,8 @@ export function mapValidationErrors(
       } else {
         generalErrors.push(message);
       }
+    } else if (loc.includes("weighing_error_g")) {
+      weighingErrorError = message;
     } else {
       generalErrors.push(message);
     }
@@ -90,5 +96,5 @@ export function mapValidationErrors(
   if (details.length === 0) {
     generalErrors.push("请求未通过服务端校验");
   }
-  return { fieldErrors, conditionErrors, generalErrors };
+  return { fieldErrors, conditionErrors, weighingErrorError, generalErrors };
 }

@@ -8,17 +8,30 @@ const API_BASE: string = import.meta.env.VITE_API_BASE_URL ?? "";
 /**
  * 调用后端核验接口；422 抛出 ApiValidationError，其余非 2xx 抛出普通 Error。
  * condition 为两项工况填写完整且合法时携带，否则省略（按原方式核验）。
+ * weighingErrorG 为称量误差填写且合法时携带，否则省略（响应不含误差评估）。
  */
 export async function verifyRotor(
   tubes: TubePayload[],
   condition?: ConditionPayload | null,
+  weighingErrorG?: number | null,
 ): Promise<VerifyResponse> {
+  const payload: {
+    tubes: TubePayload[];
+    condition?: ConditionPayload;
+    weighing_error_g?: number;
+  } = { tubes };
+  if (condition) {
+    payload.condition = condition;
+  }
+  if (weighingErrorG !== null && weighingErrorG !== undefined) {
+    payload.weighing_error_g = weighingErrorG;
+  }
   let response: Response;
   try {
     response = await fetch(`${API_BASE}/api/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(condition ? { tubes, condition } : { tubes }),
+      body: JSON.stringify(payload),
     });
   } catch {
     throw new Error("无法连接核验服务，请确认后端已启动");

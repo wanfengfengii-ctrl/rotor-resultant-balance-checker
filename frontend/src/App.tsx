@@ -3,11 +3,13 @@ import { verifyRotor } from "./api";
 import { RotorView } from "./components/RotorView";
 import { ResultPanel } from "./components/ResultPanel";
 import { ConditionInputs } from "./components/ConditionInputs";
+import { WeighingErrorInput } from "./components/WeighingErrorInput";
 import { ApiValidationError, mapValidationErrors } from "./lib/errors";
 import {
   buildCondition,
   type ConditionField,
 } from "./lib/condition";
+import { buildWeighingError } from "./lib/weighingError";
 import { buildTubes, countFilled, HOLE_COUNT } from "./lib/rotor";
 import type {
   BalanceSuggestion,
@@ -20,19 +22,24 @@ export default function App() {
   // 可选工况：转速与有效半径；应用建议与重新核验期间均保留，清空时才复位
   const [speedInput, setSpeedInput] = useState("");
   const [radiusInput, setRadiusInput] = useState("");
+  // 可选称量误差：每支试管统一的标称误差（克）；留空则不做误差评估
+  const [weighingErrorInput, setWeighingErrorInput] = useState("");
   const [result, setResult] = useState<VerifyResponse | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<number, string>>({});
   const [conditionErrors, setConditionErrors] = useState<
     Partial<Record<ConditionField, string>>
   >({});
+  const [weighingErrorError, setWeighingErrorError] = useState<string | null>(
+    null,
+  );
   const [generalErrors, setGeneralErrors] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
   // 对置差异诊断中被点选的孔对（以较小孔号标识）；随旧结果在任何录入修改、
   // 应用建议、重新提交或请求失败时一起清除，绝不跨结果保留高亮
   const [selectedPairHole, setSelectedPairHole] = useState<number | null>(null);
-  // 载荷版本号：任何录入修改（孔位或工况）都同步递增（ref 不等待重渲染）。
+  // 载荷版本号：任何录入修改（孔位、工况或称量误差）都同步递增（ref 不等待重渲染）。
   // 核验响应返回时若版本已变，说明载荷在飞行途中被改过，
-  // 该次响应（结论 / 建议 / 422 错误）一律作废，以当前载荷重新核验为准。
+  // 该次响应（结论 / 建议 / 评估 / 422 错误）一律作废，以当前载荷重新核验为准。
   const loadVersionRef = useRef(0);
 
   // 修改任何孔位：立即清除旧结论与旧错误，绝不沿用上一次放行结果；
@@ -44,6 +51,7 @@ export default function App() {
     setSelectedPairHole(null);
     setFieldErrors({});
     setConditionErrors({});
+    setWeighingErrorError(null);
     setGeneralErrors([]);
     setPending(false);
   }, []);
@@ -61,21 +69,38 @@ export default function App() {
       setSelectedPairHole(null);
       setFieldErrors({});
       setConditionErrors({});
+      setWeighingErrorError(null);
       setGeneralErrors([]);
       setPending(false);
     },
     [],
   );
 
+  // 修改称量误差与修改孔位、工况同效：旧结论与旧误差评估立即清除，
+  // 在途响应由版本号机制作废；非法输入的字段反馈不改动当前录入内容
+  const handleWeighingErrorChange = useCallback((value: string) => {
+    loadVersionRef.current += 1;
+    setWeighingErrorInput(value);
+    setResult(null);
+    setSelectedPairHole(null);
+    setFieldErrors({});
+    setConditionErrors({});
+    setWeighingErrorError(null);
+    setGeneralErrors([]);
+    setPending(false);
+  }, []);
+
   const handleClear = useCallback(() => {
     loadVersionRef.current += 1;
     setInputs(Array(HOLE_COUNT).fill(""));
     setSpeedInput("");
     setRadiusInput("");
+    setWeighingErrorInput("");
     setResult(null);
     setSelectedPairHole(null);
     setFieldErrors({});
     setConditionErrors({});
+    setWeighingErrorError(null);
     setGeneralErrors([]);
     setPending(false);
   }, []);
@@ -83,7 +108,7 @@ export default function App() {
   // 应用配平建议：把建议质量写入对应空孔并清除旧结论，
   // 最终结论仍由操作员点击「核验」产生。
   // 建议目标孔已被占用时旧建议失效：不得覆盖当前录入。
-  // 工况参数（转速 / 有效半径）原样保留，供再次核验复用。
+  // 工况参数（转速 / 有效半径）与称量误差原样保留，供再次核验复用。
   const handleApplySuggestion = useCallback((suggestion: BalanceSuggestion) => {
     loadVersionRef.current += 1;
     setInputs((prev) => {
@@ -99,6 +124,7 @@ export default function App() {
     setSelectedPairHole(null);
     setFieldErrors({});
     setConditionErrors({});
+    setWeighingErrorError(null);
     setGeneralErrors([]);
     setPending(false);
   }, []);
@@ -117,6 +143,7 @@ export default function App() {
     setSelectedPairHole(null);
     setFieldErrors({});
     setConditionErrors({});
+    setWeighingErrorError(null);
     setGeneralErrors([]);
 
     const { tubes, holes, fieldErrors: localErrors } = buildTubes(inputs);
@@ -124,12 +151,17 @@ export default function App() {
       speedInput,
       radiusInput,
     );
+    const { value: weighingErrorG, error: localWeighingErrorError } =
+      buildWeighingError(weighingErrorInput);
     if (
       Object.keys(localErrors).length > 0 ||
-      Object.keys(localConditionErrors).length > 0
+      Object.keys(localConditionErrors).length > 0 ||
+      localWeighingErrorError
     ) {
+      // 非法录入只给出字段反馈：输入框内容保持原样，不被清空或改写
       setFieldErrors(localErrors);
       setConditionErrors(localConditionErrors);
+      setWeighingErrorError(localWeighingErrorError ?? null);
       return;
     }
 
@@ -137,7 +169,7 @@ export default function App() {
     // 记录提交时的载荷版本；响应返回时版本不一致即视为过期响应
     const submittedVersion = loadVersionRef.current;
     try {
-      const response = await verifyRotor(tubes, condition);
+      const response = await verifyRotor(tubes, condition, weighingErrorG);
       if (loadVersionRef.current !== submittedVersion) {
         return; // 载荷已在等待期间修改：丢弃迟到的结论与建议
       }
@@ -150,6 +182,7 @@ export default function App() {
         const mapped = mapValidationErrors(error.details, holes);
         setFieldErrors(mapped.fieldErrors);
         setConditionErrors(mapped.conditionErrors);
+        setWeighingErrorError(mapped.weighingErrorError ?? null);
         setGeneralErrors(mapped.generalErrors);
       } else {
         setGeneralErrors([
@@ -163,7 +196,7 @@ export default function App() {
         setPending(false);
       }
     }
-  }, [inputs, speedInput, radiusInput]);
+  }, [inputs, speedInput, radiusInput, weighingErrorInput]);
 
   const filled = useMemo(() => countFilled(inputs), [inputs]);
 
@@ -208,6 +241,11 @@ export default function App() {
             radius={radiusInput}
             errors={conditionErrors}
             onChange={handleConditionChange}
+          />
+          <WeighingErrorInput
+            value={weighingErrorInput}
+            error={weighingErrorError}
+            onChange={handleWeighingErrorChange}
           />
           <div className="controls">
             <button

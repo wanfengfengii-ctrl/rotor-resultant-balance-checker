@@ -536,3 +536,226 @@ class TestOperatingCondition:
         assert applied_body["balanced"] is True
         assert applied_body["residual_g"] == 0.0
         assert applied_body["condition"]["centrifugal_force_display"] == "0.00"
+
+
+class TestWeighingError:
+    def test_omitted_error_returns_no_assessment_and_keeps_existing_result(self):
+        resp = post({"tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}]})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["error_assessment"] is None
+        # 既有判定与字段不受影响
+        assert body["balanced"] is True
+        assert body["residual_display"] == "4.00"
+        assert body["suggestion"] is None
+        assert body["condition"] is None
+
+    def test_example_interval_3_to_5_is_definite_pass(self):
+        # 残余量 4 g、两支试管、每支误差 0.5 g：E = 1 g，区间 [3.00, 5.00]，
+        # 上界不超过 5 g → 确定放行
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],
+                "weighing_error_g": 0.5,
+            }
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        # 名义判定保持放行，评估另附
+        assert body["balanced"] is True
+        assert body["verdict"] == "放行"
+        assessment = body["error_assessment"]
+        assert assessment is not None
+        assert assessment["error_per_tube_g"] == 0.5
+        assert assessment["tube_count"] == 2
+        assert assessment["total_error_g"] == pytest.approx(1.0)
+        assert assessment["total_error_display"] == "1.00"
+        assert assessment["lower_bound_g"] == pytest.approx(3.0)
+        assert assessment["lower_bound_display"] == "3.00"
+        assert assessment["upper_bound_g"] == pytest.approx(5.0)
+        assert assessment["upper_bound_display"] == "5.00"
+        assert assessment["kind"] == "definite_pass"
+        assert assessment["label"] == "确定放行"
+
+    def test_interval_crossing_threshold_is_borderline(self):
+        # 阈值另一侧：同一载荷每支误差 0.75 g → 区间 [2.50, 5.50] 跨阈值
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],
+                "weighing_error_g": 0.75,
+            }
+        )
+        body = resp.json()
+        assessment = body["error_assessment"]
+        assert assessment["lower_bound_display"] == "2.50"
+        assert assessment["upper_bound_display"] == "5.50"
+        assert assessment["kind"] == "borderline"
+        assert assessment["label"] == "临界待复称"
+
+    def test_lower_bound_above_threshold_is_definite_reject(self):
+        # 残余量 10 g、每支误差 0.5 g → 区间 [9.00, 11.00]，下界大于 5 g
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 90}],
+                "weighing_error_g": 0.5,
+            }
+        )
+        body = resp.json()
+        assert body["balanced"] is False
+        assessment = body["error_assessment"]
+        assert assessment["lower_bound_display"] == "9.00"
+        assert assessment["upper_bound_display"] == "11.00"
+        assert assessment["kind"] == "definite_reject"
+        assert assessment["label"] == "确定拒绝"
+
+    def test_nominally_rejected_but_interval_crossing_is_borderline(self):
+        # 名义判定拒绝（残余 6 g），误差使区间 [5.00, 7.00] 触及阈值 → 临界
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 94}],
+                "weighing_error_g": 0.5,
+            }
+        )
+        body = resp.json()
+        assert body["balanced"] is False
+        assessment = body["error_assessment"]
+        assert assessment["lower_bound_display"] == "5.00"
+        assert assessment["kind"] == "borderline"
+
+    def test_zero_error_accepted_and_collapses_interval(self):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],
+                "weighing_error_g": 0,
+            }
+        )
+        assert resp.status_code == 200
+        assessment = resp.json()["error_assessment"]
+        assert assessment["total_error_g"] == 0.0
+        assert assessment["lower_bound_display"] == "4.00"
+        assert assessment["upper_bound_display"] == "4.00"
+        assert assessment["kind"] == "definite_pass"
+
+    def test_max_error_five_grams_accepted_and_clamps_lower_bound(self):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],
+                "weighing_error_g": 5,
+            }
+        )
+        assert resp.status_code == 200
+        assessment = resp.json()["error_assessment"]
+        assert assessment["total_error_display"] == "10.00"
+        assert assessment["lower_bound_g"] == 0.0  # max(0, 4 − 10)
+        assert assessment["upper_bound_display"] == "14.00"
+        assert assessment["kind"] == "borderline"
+
+    def test_assessment_uses_unrounded_residual(self):
+        # 整数载荷 100@0 + 96@6 + 1@3：残余量 √17 ≈ 4.1231（显示 4.12），
+        # 总误差必须按未舍入残余量平移区间
+        resp = post(
+            {
+                "tubes": [
+                    {"hole": 0, "mass_g": 100},
+                    {"hole": 6, "mass_g": 96},
+                    {"hole": 3, "mass_g": 1},
+                ],
+                "weighing_error_g": 0.5,
+            }
+        )
+        body = resp.json()
+        residual = body["residual_g"]
+        assert residual == pytest.approx(math.sqrt(17), abs=1e-9)
+        assessment = body["error_assessment"]
+        assert assessment["tube_count"] == 3
+        assert assessment["total_error_g"] == pytest.approx(1.5)
+        assert assessment["lower_bound_g"] == pytest.approx(residual - 1.5, abs=1e-9)
+        assert assessment["upper_bound_g"] == pytest.approx(residual + 1.5, abs=1e-9)
+
+    def test_assessment_does_not_change_verdict_suggestion_or_diagnostics(self):
+        # 拒绝 + 建议场景：误差评估只附加区间，建议仍由名义残余量产生
+        resp = post(
+            {
+                "tubes": [
+                    {"hole": 0, "mass_g": 100},
+                    {"hole": 6, "mass_g": 100},
+                    {"hole": 3, "mass_g": 10},
+                ],
+                "weighing_error_g": 0.5,
+            }
+        )
+        body = resp.json()
+        assert body["balanced"] is False
+        assert body["suggestion"] == {
+            "hole": 9,
+            "mass_g": 10,
+            "predicted_residual_g": 0.0,
+            "predicted_residual_display": "0.00",
+        }
+        assert len(body["opposite_differences"]) == 6
+        assessment = body["error_assessment"]
+        assert assessment["tube_count"] == 3
+        assert assessment["lower_bound_display"] == "8.50"
+        assert assessment["upper_bound_display"] == "11.50"
+        assert assessment["kind"] == "definite_reject"
+
+    def test_assessment_coexists_with_condition(self):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],
+                "condition": {"speed_rpm": 3000, "radius_mm": 100},
+                "weighing_error_g": 0.5,
+            }
+        )
+        body = resp.json()
+        assert body["condition"]["centrifugal_force_display"] == "39.48"
+        assert body["error_assessment"]["kind"] == "definite_pass"
+
+    @pytest.mark.parametrize("bad", [-0.1, -1, 5.01, 6, 100])
+    def test_out_of_range_error_rejected_and_localized(self, bad):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],
+                "weighing_error_g": bad,
+            }
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(e["loc"][-1] == "weighing_error_g" for e in detail), detail
+        assert any("0 至 5" in e["msg"] for e in detail)
+
+    @pytest.mark.parametrize("bad", [0.001, 0.505, 1.234, 4.999])
+    def test_more_than_two_decimals_rejected_and_localized(self, bad):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],
+                "weighing_error_g": bad,
+            }
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(e["loc"][-1] == "weighing_error_g" for e in detail), detail
+        assert any("两位小数" in e["msg"] for e in detail)
+
+    @pytest.mark.parametrize("bad", ["0.5", "abc", True, [0.5]])
+    def test_non_numeric_error_rejected_and_localized(self, bad):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],
+                "weighing_error_g": bad,
+            }
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(e["loc"][-1] == "weighing_error_g" for e in detail), detail
+
+    @pytest.mark.parametrize("ok", [0, 5, 0.05, 2.5, 4.99, 1])
+    def test_boundary_and_integer_errors_accepted(self, ok):
+        resp = post(
+            {
+                "tubes": [{"hole": 0, "mass_g": 100}, {"hole": 6, "mass_g": 96}],
+                "weighing_error_g": ok,
+            }
+        )
+        assert resp.status_code == 200
+        assert resp.json()["error_assessment"]["error_per_tube_g"] == pytest.approx(ok)
